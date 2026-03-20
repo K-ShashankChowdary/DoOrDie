@@ -3,6 +3,8 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { ApiError } from "./utils/ApiError.js";
 
+
+
 const app = express();
 
 // Global Middleware
@@ -16,6 +18,11 @@ app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 app.use(express.static("public")); 
 app.use(cookieParser());
 
+//routes Import
+import userRouter from "./src/routes/user.routes.js";
+
+// Routes mounting
+app.use("/api/v1/users", userRouter);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

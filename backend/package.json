@@ -20,7 +20,7 @@
     "mongoose": "^9.3.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "nodemon": "^3.1.14"
   }
 }
