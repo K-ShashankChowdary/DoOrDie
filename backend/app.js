@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { ApiError } from "./utils/ApiError.js";
+import { ApiError } from "./src/utils/ApiError.js";
 
 
 
@@ -20,9 +20,11 @@ app.use(cookieParser());
 
 //routes Import
 import userRouter from "./src/routes/user.routes.js";
+import contractRouter from "./src/routes/contract.routes.js";
 
 // Routes mounting
 app.use("/api/v1/users", userRouter);
+app.use("/api/v1/contracts", contractRouter);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

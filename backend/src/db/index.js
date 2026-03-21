@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { DB_NAME } from "../constants.js";
+import { DB_NAME } from "../constant.js";
 
 // connects to MongoDB, exits process on failure to prevent running without a database
 const connectDB = async () => {
