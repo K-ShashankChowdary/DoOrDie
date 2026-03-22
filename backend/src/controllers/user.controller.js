@@ -40,11 +40,16 @@ const registerUser = asyncHandler(async (req, res) => {
 
     const user = await User.create({ fullName, email, password, upiId: upiId || "" });
 
+    const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(user._id);
     const createdUser = await User.findById(user._id).select("-password -refreshToken");
 
-    return res.status(201).json(
-        new ApiResponse(201, createdUser, "User registered successfully")
-    );
+    return res
+        .status(201)
+        .cookie("accessToken", accessToken, cookieOptions)
+        .cookie("refreshToken", refreshToken, cookieOptions)
+        .json(
+            new ApiResponse(201, { user: createdUser, accessToken, refreshToken }, "User registered and logged in successfully")
+        );
 });
 
 // LOGIN 
@@ -128,4 +133,27 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
     }
 });
 
-export { registerUser, loginUser, logoutUser, refreshAccessToken };
+// SEARCH USERS (For finding a validator)
+const searchUsers = asyncHandler(async (req, res) => {
+    const { query } = req.query;
+    
+    if (!query || query.trim() === "") {
+        return res.status(200).json(new ApiResponse(200, [], "Empty query"));
+    }
+
+    // Escape regex characters to prevent ReDoS
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Search by fullName or email or upiId
+    const users = await User.find({
+        $or: [
+            { fullName: { $regex: escapedQuery, $options: "i" } },
+            { email: { $regex: escapedQuery, $options: "i" } },
+            { upiId: { $regex: escapedQuery, $options: "i" } }
+        ]
+    }).select("_id fullName email");
+
+    return res.status(200).json(new ApiResponse(200, users, "Users retrieved successfully"));
+});
+
+export { registerUser, loginUser, logoutUser, refreshAccessToken, searchUsers };

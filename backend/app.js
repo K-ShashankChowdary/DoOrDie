@@ -29,8 +29,20 @@ app.use("/api/v1/contracts", contractRouter);
 // Global Error Handler
 app.use((err, req, res, next) => {
     if (!(err instanceof ApiError)) {
-        const statusCode = err.statusCode || 500;
-        const message = err.message || "Internal Server Error";
+        let statusCode = err.statusCode || 500;
+        let message = err.message || "Internal Server Error";
+
+        // Handle Mongoose Validation and Cast Errors natively
+        if (err.name === "ValidationError" || err.name === "CastError") {
+            statusCode = 400;
+            message = err.message;
+        }
+
+        if (err.code === 11000) { // MongoDB duplicate key
+            statusCode = 409;
+            message = "Duplicate key error: " + Object.keys(err.keyValue).join(', ') + " already exists.";
+        }
+
         err = new ApiError(statusCode, message, err?.errors || [], err.stack);
     }
 

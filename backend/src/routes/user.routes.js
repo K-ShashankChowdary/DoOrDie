@@ -3,7 +3,8 @@ import {
     registerUser, 
     loginUser, 
     logoutUser, 
-    refreshAccessToken 
+    refreshAccessToken,
+    searchUsers
 } from "../controllers/user.controller.js";
 import { verifyJWT } from "../middleware/auth.middleware.js";
 
@@ -17,5 +18,8 @@ router.route("/logout").post(verifyJWT, logoutUser);
 
 // Silent Refresh
 router.route("/refresh-token").post(refreshAccessToken);
+
+// Search Users
+router.route("/search").get(verifyJWT, searchUsers);
 
 export default router;

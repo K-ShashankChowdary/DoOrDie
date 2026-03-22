@@ -16,6 +16,7 @@ const userSchema = new Schema(
             unique: true,
             lowercase: true,
             trim: true,
+            match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please fill a valid email address']
         },
         password: {
             type: String,
@@ -66,8 +67,7 @@ userSchema.methods.generateAccessToken = function () {
 userSchema.methods.generateRefreshToken = function () {
     return jwt.sign(
         {
-            _id: this._id,
-            
+            _id: this._id
         },
         process.env.REFRESH_TOKEN_SECRET,
         {
