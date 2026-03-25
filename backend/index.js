@@ -2,6 +2,7 @@ import "dotenv/config";
 import { createServer } from "http";
 import connectDB from "./src/db/index.js";
 import { app } from "./app.js";
+import "./src/workers/deadline.worker.js";
 
 const startServer = async () => {
     try {

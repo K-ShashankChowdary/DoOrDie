@@ -35,15 +35,16 @@ const contractSchema = new Schema(
             ref: "User",
             required: true
         },
-        //Gemini Vision check
+        //Images a proof for validator to verify or for ai to verify
         proofImageUrl: {
             type: String, 
             default: ""
         },
-        //payment ids
+        //payments order ID
         razorpayOrderId: {
             type: String,
         },
+        //payments paymentId
         razorpayPaymentId: {
             type: String,
         }
@@ -52,5 +53,18 @@ const contractSchema = new Schema(
         timestamps: true
     }
 );
+// Indexes for optimized querying
+contractSchema.index({ creator: 1, status: 1 });
+
+// Pre-save hook to ensure absolute deadline immutability (except for marking it as FAILED)
+contractSchema.pre("save", function (next) {
+    if (!this.isNew && this.deadline < new Date()) {
+        if (this.isModified("status") && this.status === "FAILED") {
+            return next();
+        }
+        return next(new Error("Cannot modify contract: Deadline has already passed."));
+    }
+    next();
+});
 
 export const Contract = mongoose.model("Contract", contractSchema);
