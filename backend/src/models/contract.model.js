@@ -35,10 +35,20 @@ const contractSchema = new Schema(
             ref: "User",
             required: true
         },
-        //Images a proof for validator to verify or for ai to verify
-        proofImageUrl: {
-            type: String, 
-            default: ""
+        // Proof fields — at least one must be present when uploading proof.
+        // Images: array of Cloudinary URLs uploaded directly from the frontend.
+        proofImages: {
+            type: [String],
+            default: []
+        },
+        // Links: array of external URLs (GitHub commit, Notion page, etc.)
+        proofLinks: {
+            type: [String],
+            default: []
+        },
+        // Text: description / explanation from the creator.
+        proofText: {
+            type: String,
         },
         //payments order ID
         razorpayOrderId: {
@@ -56,13 +66,19 @@ const contractSchema = new Schema(
 // Indexes for optimized querying
 contractSchema.index({ creator: 1, status: 1 });
 
-// Pre-save hook to ensure absolute deadline immutability (except for marking it as FAILED)
+// Pre-save hook to block late proof submissions (race condition protection)
+// but allow validators or background workers to resolve contracts after the deadline.
 contractSchema.pre("save", function (next) {
     if (!this.isNew && this.deadline < new Date()) {
-        if (this.isModified("status") && this.status === "FAILED") {
-            return next();
+        const isLateProofUpload =
+            this.isModified("proofImages") ||
+            this.isModified("proofLinks") ||
+            this.isModified("proofText") ||
+            (this.isModified("status") && this.status === "VALIDATING");
+
+        if (isLateProofUpload) {
+            return next(new Error("Cannot upload proof: Deadline has already passed."));
         }
-        return next(new Error("Cannot modify contract: Deadline has already passed."));
     }
     next();
 });

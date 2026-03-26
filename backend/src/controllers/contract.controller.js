@@ -5,8 +5,9 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { Contract } from "../models/contract.model.js";
 import { User } from "../models/user.model.js";
 import Razorpay from "razorpay";
-import crypto from "crypto";
+import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils.js";
 import { contractDeadlineQueue } from "../workers/deadline.worker.js";
+import { validatorGraceQueue } from "../workers/gracePeriod.worker.js";
 
 // ============================================================================
 // 1. Initialize Razorpay
@@ -23,7 +24,10 @@ const createContract = asyncHandler(async (req, res) => {
   const { title, description, stakeAmount, deadline, validator } = req.body;
 
   if (!title || !stakeAmount || !deadline || !validator) {
-    throw new ApiError(400, "Title, Stake Amount, Deadline, and Validator are required");
+    throw new ApiError(
+      400,
+      "Title, Stake Amount, Deadline, and Validator are required",
+    );
   }
 
   // Ensure the user isn't betting less than the platform minimum of ₹50
@@ -94,12 +98,20 @@ const generatePaymentOrder = asyncHandler(async (req, res) => {
     throw new ApiError(400, "This contract is already active or completed");
   }
 
-  // Razorpay requires the payment amount to be in the smallest currency sub-unit (paise for INR). 
+  // Prevent users from generating payment if they missed the deadline
+  if (contract.deadline < new Date()) {
+    throw new ApiError(
+      400,
+      "The deadline for this contract has already passed. Payment cannot be initiated.",
+    );
+  }
+
+  // Razorpay requires the payment amount to be in the smallest currency sub-unit (paise for INR).
   // We multiply the rupee amount by 100 and use Math.round to avoid floating point inaccuracies.
   const options = {
     amount: Math.round(contract.stakeAmount * 100),
     currency: "INR",
-    receipt: `receipt_contract_${contract._id}`,
+    receipt: `rc_${contract._id}`,
   };
 
   const order = await razorpay.orders.create(options);
@@ -127,22 +139,27 @@ const generatePaymentOrder = asyncHandler(async (req, res) => {
 // 4. Verify Payment (Triggered by Razorpay after successful checkout)
 // ============================================================================
 const verifyPayment = asyncHandler(async (req, res) => {
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+    req.body;
 
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     throw new ApiError(400, "Missing required Razorpay payment details");
   }
 
-  // Construct the expected signature by hashing the order ID and payment ID using our secret key.
-  // This proves that the payload actually came from Razorpay and hasn't been tampered with.
-  const body = razorpay_order_id + "|" + razorpay_payment_id;
-  const expectedSignature = crypto
-    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-    .update(body.toString())
-    .digest("hex");
+  // Use Razorpay's official SDK utility to verify the payment signature (HMAC-SHA256).
+  // This replaces the manual crypto block and ensures we use the same algorithm
+  // as Razorpay's own servers, with no room for implementation drift.
+  const isValidSignature = validatePaymentVerification(
+    { order_id: razorpay_order_id, payment_id: razorpay_payment_id },
+    razorpay_signature,
+    process.env.RAZORPAY_KEY_SECRET,
+  );
 
-  if (expectedSignature !== razorpay_signature) {
-    throw new ApiError(400, "Invalid payment signature. Potential fraud detected.");
+  if (!isValidSignature) {
+    throw new ApiError(
+      400,
+      "Invalid payment signature. Potential fraud detected.",
+    );
   }
 
   // ============================================================================
@@ -168,47 +185,68 @@ const verifyPayment = asyncHandler(async (req, res) => {
 
     // Idempotency check: If Razorpay's webhook triggers this endpoint multiple times for the same payment,
     // we want to cleanly exit without throwing an error or running the transaction again.
-    if (contract.status === "ACTIVE" || contract.razorpayPaymentId === razorpay_payment_id) {
+    if (
+      contract.status === "ACTIVE" ||
+      contract.razorpayPaymentId === razorpay_payment_id
+    ) {
       // Clean rollback if the rules dictate we shouldn't proceed
       await session.abortTransaction();
       session.endSession();
-      return res.status(200).json(
-        new ApiResponse(200, { contractId: contract._id, status: contract.status }, "Payment already verified.")
-      );
+      return res
+        .status(200)
+        .json(
+          new ApiResponse(
+            200,
+            { contractId: contract._id, status: contract.status },
+            "Payment already verified.",
+          ),
+        );
     }
 
     // 4. Update the contract document
     contract.status = "ACTIVE";
     contract.razorpayPaymentId = razorpay_payment_id;
-    
+
     // Pass the session explicitly so it operates within the isolated transaction
     await contract.save({ validateBeforeSave: false, session });
 
-    // FUTURE ROADMAP: If we ever need to create a TransactionHistory document or 
-    // update a User's total staked balance, we would do it right here with `{ session }`. 
+    // FUTURE ROADMAP: If we ever need to create a TransactionHistory document or
+    // update a User's total staked balance, we would do it right here with `{ session }`.
     // Example: await Transaction.create([{ ... }], { session });
-    
-    // 5. Commit! 
+
+    // 5. Commit!
     // D - DURABILITY: Once transaction is committed, changes are written to disk permanently.
     // Even if the server crashes right after this line, the contract status stays "ACTIVE".
     await session.commitTransaction();
-    
-    // Add the BullMQ delayed job to auto-fail if deadline lapses
-    const delay = Math.max(0, new Date(contract.deadline).getTime() - Date.now());
-    await contractDeadlineQueue.add('check-contract-deadline', { contractId: contract._id }, { delay });
 
-    return res.status(200).json(
-      new ApiResponse(
-        200,
-        { contractId: contract._id, status: contract.status },
-        "Payment verified! Contract is now ACTIVE under full ACID transaction.",
-      ),
+    // Add the BullMQ delayed job to auto-fail if deadline lapses
+    const delay = Math.max(
+      0,
+      new Date(contract.deadline).getTime() - Date.now(),
     );
+    await contractDeadlineQueue.add(
+      "check-contract-deadline",
+      { contractId: contract._id },
+      { delay },
+    );
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { contractId: contract._id, status: contract.status },
+          "Payment verified! Contract is now ACTIVE under full ACID transaction.",
+        ),
+      );
   } catch (error) {
     // A - ATOMICITY (Rollback): If any error occurs inside the `try` block (e.g., Mongoose validation fails,
     // or a network timeout happens), we abort the transaction so partial states aren't left behind.
     await session.abortTransaction();
-    throw new ApiError(error.statusCode || 500, error.message || "Payment verification transaction failed.");
+    throw new ApiError(
+      error.statusCode || 500,
+      error.message || "Payment verification transaction failed.",
+    );
   } finally {
     // Always release the session properly to free up database resources
     session.endSession();
@@ -226,7 +264,9 @@ const getUserContracts = asyncHandler(async (req, res) => {
 
   return res
     .status(200)
-    .json(new ApiResponse(200, { contracts }, "Contracts retrieved successfully"));
+    .json(
+      new ApiResponse(200, { contracts }, "Contracts retrieved successfully"),
+    );
 });
 
 // Get details for a specific contract by ID
@@ -248,16 +288,31 @@ const getContractById = asyncHandler(async (req, res) => {
     throw new ApiError(403, "Not authorized to view this contract");
   }
 
-  return res.status(200).json(new ApiResponse(200, { contract }, "Contract details found"));
+  return res
+    .status(200)
+    .json(new ApiResponse(200, { contract }, "Contract details found"));
 });
 
-// Upload proof image and change status to VALIDATING
+// Upload proof and change status to VALIDATING.
+// Proof is flexible: the creator can supply any combination of:
+//   - proofImages: string[] — Cloudinary URLs uploaded client-side
+//   - proofLinks:  string[] — external links (GitHub, Notion, etc.)
+//   - proofText:   string  — free-form textual explanation
+// At least one field must be non-empty.
 const uploadProof = asyncHandler(async (req, res) => {
   const { contractId } = req.params;
-  const { proofImageUrl } = req.body;
+  const { proofImages = [], proofLinks = [], proofText = "" } = req.body;
 
-  if (!proofImageUrl) {
-    throw new ApiError(400, "Proof image URL is required");
+  // Validate: at least one proof field must carry real content
+  const hasImages = Array.isArray(proofImages) && proofImages.length > 0;
+  const hasLinks = Array.isArray(proofLinks) && proofLinks.length > 0;
+  const hasText = typeof proofText === "string" && proofText.trim().length > 0;
+
+  if (!hasImages && !hasLinks && !hasText) {
+    throw new ApiError(
+      400,
+      "At least one proof item (image, link, or text) is required",
+    );
   }
 
   const contract = await Contract.findById(contractId);
@@ -265,25 +320,43 @@ const uploadProof = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Contract not found");
   }
 
-  // Only the person who created the task is allowed to submit the proof of completion
+  // Only the creator may submit proof
   if (contract.creator.toString() !== req.user._id.toString()) {
     throw new ApiError(403, "Only the creator can upload proof");
   }
 
-  // If the contract is already failed (deadline passed) or already validating, reject the upload
+  // Contract must be ACTIVE to accept proof
   if (contract.status !== "ACTIVE") {
-    throw new ApiError(400, `Cannot upload proof. Contract status is ${contract.status}`);
+    throw new ApiError(
+      400,
+      `Cannot upload proof. Contract status is ${contract.status}`,
+    );
   }
 
-  // Transitioning to VALIDATING inherently pauses the contract. 
-  // If the BullMQ deadline worker runs while in this state, it will spare the contract from automatically failing.
-  contract.proofImageUrl = proofImageUrl;
+  // Persist proof fields and transition status.
+  // Transitioning to VALIDATING pauses the deadline worker (it skips VALIDATING contracts).
+  if (hasImages) contract.proofImages = proofImages;
+  if (hasLinks) contract.proofLinks = proofLinks;
+  if (hasText) contract.proofText = proofText.trim();
   contract.status = "VALIDATING";
   await contract.save({ validateBeforeSave: false });
 
+  // Arm the grace-period worker: auto-refund creator if validator ghosts for 48 hrs after deadline
+  const gracePeriodDelay = Math.max(
+    0,
+    new Date(contract.deadline).getTime() + 48 * 60 * 60 * 1000 - Date.now(),
+  );
+  await validatorGraceQueue.add(
+    "check-grace-period",
+    { contractId: contract._id },
+    { delay: gracePeriodDelay },
+  );
+
   return res
     .status(200)
-    .json(new ApiResponse(200, { contract }, "Proof uploaded. Pending validation."));
+    .json(
+      new ApiResponse(200, { contract }, "Proof uploaded. Pending validation."),
+    );
 });
 
 // Verify proof image (approve or reject) and update status
@@ -295,36 +368,89 @@ const verifyProof = asyncHandler(async (req, res) => {
     throw new ApiError(400, "isApproved boolean is required");
   }
 
-  const contract = await Contract.findById(contractId);
+  // Pre-fetch the contract to check validator ID before taking the lock
+  let contract = await Contract.findById(contractId);
   if (!contract) {
     throw new ApiError(404, "Contract not found");
   }
 
   // Only the assigned third-party judge can evaluate the proof
   if (contract.validator.toString() !== req.user._id.toString()) {
-    throw new ApiError(403, "Only the assigned validator can verify this proof");
-  }
-
-  // We can only evaluate proofs that have actually been uploaded by the creator
-  if (contract.status !== "VALIDATING") {
-    throw new ApiError(400, `Cannot verify proof. Contract is not in VALIDATING state.`);
-  }
-
-  // The validator has made their decision.
-  // True means the creator achieved their goal (COMPLETED).
-  // False means the creator failed their goal and forfeits their stake (FAILED).
-  contract.status = isApproved ? "COMPLETED" : "FAILED";
-  await contract.save({ validateBeforeSave: false });
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        { contract },
-        `Contract ${contract.status} successfully`
-      )
+    throw new ApiError(
+      403,
+      "Only the assigned validator can verify this proof",
     );
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Use atomic findOneAndUpdate to instantly lock the document and transition the state.
+    // This prevents double-spend race conditions if the validator double-clicks the "Reject" button.
+    contract = await Contract.findOneAndUpdate(
+      { _id: contractId, status: "VALIDATING" },
+      { $set: { status: isApproved ? "COMPLETED" : "FAILED" } },
+      { new: true, session },
+    ).populate("validator");
+
+    if (!contract) {
+      throw new ApiError(
+        400,
+        "Cannot verify proof. Contract is not in VALIDATING state or already verified.",
+      );
+    }
+
+    // The state is successfully locked in DB. Proceed with irreversible Razorpay API calls.
+    if (isApproved) {
+      // Success: Full Refund to the creator
+      if (contract.razorpayPaymentId) {
+        await razorpay.payments.refund(contract.razorpayPaymentId, {
+          notes: { reason: "Task successfully completed by creator." },
+        });
+      } else {
+        // This should never happen in production — it means a contract was approved
+        // without ever being paid for. Log it loudly for audit purposes.
+        console.error(
+          `[Payout] CRITICAL: Contract ${contract._id} was approved but has no razorpayPaymentId. No refund issued.`,
+        );
+      }
+    } else {
+      // Failure: Transfer stake to validator
+      if (contract.validator.razorpayLinkedAccountId) {
+        await razorpay.transfers.create({
+          account: contract.validator.razorpayLinkedAccountId,
+          amount: Math.round(contract.stakeAmount * 100),
+          currency: "INR",
+          notes: { reason: "Creator failed task, validator earns stake." },
+        });
+      } else {
+        console.warn(
+          `[Payout] Validator ${contract.validator._id} has no linked Razorpay account for payout.`,
+        );
+      }
+    }
+
+    await session.commitTransaction();
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { contract },
+          `Contract ${contract.status} successfully`,
+        ),
+      );
+  } catch (error) {
+    await session.abortTransaction();
+    throw new ApiError(
+      error.statusCode || 500,
+      error.message || "Failed to process payout transaction.",
+    );
+  } finally {
+    session.endSession();
+  }
 });
 
 export {

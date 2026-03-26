@@ -26,6 +26,13 @@ export const verifyJWT = asyncHandler(async (req, _, next) => {
         req.user = user;
         next();
     } catch (error) {
+        // Normalize JWT-specific errors so raw library messages don't leak to the client
+        if (error.name === "TokenExpiredError") {
+            throw new ApiError(401, "Access token has expired. Please log in again.");
+        }
+        if (error.name === "JsonWebTokenError") {
+            throw new ApiError(401, "Invalid access token.");
+        }
         throw new ApiError(401, error?.message || "Invalid access token");
     }
 });

@@ -3,6 +3,7 @@ import { createServer } from "http";
 import connectDB from "./src/db/index.js";
 import { app } from "./app.js";
 import "./src/workers/deadline.worker.js";
+import "./src/workers/gracePeriod.worker.js";
 
 const startServer = async () => {
     try {

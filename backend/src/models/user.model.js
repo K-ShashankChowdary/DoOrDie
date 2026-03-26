@@ -26,6 +26,10 @@ const userSchema = new Schema(
             type: String,
             trim: true,
         },
+        razorpayLinkedAccountId: {
+            type: String,
+            trim: true,
+        },
         refreshToken: {
             type: String
         }

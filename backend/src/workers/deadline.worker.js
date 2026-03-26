@@ -2,12 +2,18 @@ import { Worker, Queue } from 'bullmq';
 import { Contract } from '../models/contract.model.js';
 import mongoose from 'mongoose';
 import Redis from 'ioredis';
+import Razorpay from 'razorpay';
 
 // BullMQ Connection Setup
 // We use ioredis to establish a robust connection to our Redis instance.
 // maxRetriesPerRequest: null is required by BullMQ to prevent connection timeouts.
 const connection = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
     maxRetriesPerRequest: null,
+});
+
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
 // The Queue Instance: This allows other files (like contract.controller.js) 
@@ -26,7 +32,7 @@ export const deadlineWorker = new Worker('contract-deadlines', async job => {
     
     try {
         // Find the contract within the atomic lock
-        const contract = await Contract.findById(contractId).session(session);
+        const contract = await Contract.findById(contractId).populate("validator").session(session);
         
         if (!contract) {
             console.warn(`[Worker] Contract ${contractId} not found`);
@@ -43,8 +49,17 @@ export const deadlineWorker = new Worker('contract-deadlines', async job => {
             await contract.save({ session, validateBeforeSave: false });
             console.log(`[Worker] Contract ${contractId} missed deadline. Status automatically updated to FAILED.`);
             
-            // FUTURE ROADMAP: Insert Wallet/Money transfer logic here
-            // e.g., transferring the lost stake to the Validator or the house.
+            if (contract.validator && contract.validator.razorpayLinkedAccountId) {
+                await razorpay.transfers.create({
+                    account: contract.validator.razorpayLinkedAccountId,
+                    amount: Math.round(contract.stakeAmount * 100),
+                    currency: "INR",
+                    notes: { reason: "Creator missed deadline, validator earns stake." }
+                });
+                console.log(`[Worker] Transferred stake to validator ${contract.validator._id}`);
+            } else {
+                console.warn(`[Worker] Validator ${contract.validator?._id} has no linked Razorpay account for payout.`);
+            }
         } else {
              console.log(`[Worker] Contract ${contractId} is in status ${contract.status}. No automatic failure needed.`);
         }
