@@ -130,7 +130,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
     try {
         // Cryptographically verify that the token was created by us and hasn't expired
         const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
-        const user = await User.findById(decodedToken?._id);
+        const user = await User.findById(decodedToken?._id).select("-password -refreshToken");
 
         if (!user) {
             throw new ApiError(401, "Invalid refresh token");
@@ -150,7 +150,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
             .cookie("accessToken", accessToken, cookieOptions)
             .cookie("refreshToken", newRefreshToken, cookieOptions)
             .json(
-                new ApiResponse(200, { accessToken, refreshToken: newRefreshToken }, "Access token refreshed")
+                new ApiResponse(200, { user, accessToken, refreshToken: newRefreshToken }, "Access token refreshed")
             );
     } catch (error) {
         if (error.name === "TokenExpiredError") {
