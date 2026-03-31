@@ -1,29 +1,31 @@
+@import "tailwindcss";
+
 /* ─── Google Font ─────────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
 
 /* ─── Design Tokens ───────────────────────────────────────── */
 :root {
   /* Backgrounds */
-  --bg-base:       #0d0d0f;
-  --bg-surface:    #141418;
-  --bg-elevated:   #1c1c22;
-  --bg-overlay:    #25252d;
+  --bg-base:       #ffffff;
+  --bg-surface:    #fdfdfd;
+  --bg-elevated:   #ffffff;
+  --bg-overlay:    #f9fafb;
 
-  /* Brand — red/orange gradient */
-  --brand-red:     #e74c3c;
-  --brand-orange:  #f39c12;
-  --brand-grad:    linear-gradient(135deg, #e74c3c 0%, #f39c12 100%);
-  --brand-grad-r:  linear-gradient(135deg, #f39c12 0%, #e74c3c 100%);
+  /* Brand — Modern Red and White */
+  --brand-red:     #e11d48; /* Vivid Rose/Red */
+  --brand-orange:  #9f1239; /* Deep Red for gradient contrast */
+  --brand-grad:    linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+  --brand-grad-r:  linear-gradient(135deg, #be123c 0%, #e11d48 100%);
 
   /* Text */
-  --text-primary:  #f0f0f5;
-  --text-secondary:#a0a0b0;
-  --text-muted:    #5a5a6e;
+  --text-primary:  #111827;
+  --text-secondary:#4b5563;
+  --text-muted:    #9ca3af;
   --text-on-brand: #ffffff;
 
   /* Borders */
-  --border:        #2a2a35;
-  --border-focus:  #e74c3c;
+  --border:        #f3f4f6;
+  --border-focus:  #e11d48;
 
   /* Status */
   --success:       #2ecc71;
@@ -116,10 +118,11 @@ p {
 }
 
 .glass {
-  background: rgba(255,255,255,0.04);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
 }
 
 /* ─── Buttons ──────────────────────────────────────────────── */
