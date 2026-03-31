@@ -40,11 +40,10 @@ const userSchema = new Schema(
 );
 
 // HOOK: Hash the password before saving it to the database
-userSchema.pre("save", async function (next) {
-    if (!this.isModified("password")) return next();
+userSchema.pre("save", async function () {
+    if (!this.isModified("password")) return;
 
     this.password = await bcrypt.hash(this.password, 10);
-    next();
 });
 
 // METHOD: Check if the entered password matches the hashed one
