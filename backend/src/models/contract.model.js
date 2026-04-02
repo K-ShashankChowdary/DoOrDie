@@ -68,7 +68,7 @@ contractSchema.index({ creator: 1, status: 1 });
 
 // Pre-save hook to block late proof submissions (race condition protection)
 // but allow validators or background workers to resolve contracts after the deadline.
-contractSchema.pre("save", function (next) {
+contractSchema.pre("save", function () {
     if (!this.isNew && this.deadline < new Date()) {
         const isLateProofUpload =
             this.isModified("proofImages") ||
@@ -77,10 +77,9 @@ contractSchema.pre("save", function (next) {
             (this.isModified("status") && this.status === "VALIDATING");
 
         if (isLateProofUpload) {
-            return next(new Error("Cannot upload proof: Deadline has already passed."));
+            throw new Error("Cannot upload proof: Deadline has already passed.");
         }
     }
-    next();
 });
 
 export const Contract = mongoose.model("Contract", contractSchema);
