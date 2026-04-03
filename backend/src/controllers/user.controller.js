@@ -130,19 +130,25 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
     try {
         // Cryptographically verify that the token was created by us and hasn't expired
         const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
-        const user = await User.findById(decodedToken?._id).select("-password -refreshToken");
+        // NOTE: must NOT exclude refreshToken here — we need it for the comparison below
+        const user = await User.findById(decodedToken?._id).select("-password");
 
         if (!user) {
             throw new ApiError(401, "Invalid refresh token");
         }
 
         // Compare the token to the one stored in the DB to ensure it hasn't been revoked
-        if (incomingRefreshToken !== user?.refreshToken) {
+        if (incomingRefreshToken !== user.refreshToken) {
             throw new ApiError(401, "Refresh token is expired or used");
         }
 
         // Issue a fresh set of tokens
         const { accessToken, refreshToken: newRefreshToken } = await generateAccessAndRefreshTokens(user._id);
+
+        // Strip sensitive fields before sending the user object back
+        const safeUser = user.toObject();
+        delete safeUser.refreshToken;
+        delete safeUser.password;
 
         // Update the user's cookies with the new tokens so their session seamlessly stays active
         return res
@@ -150,7 +156,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
             .cookie("accessToken", accessToken, cookieOptions)
             .cookie("refreshToken", newRefreshToken, cookieOptions)
             .json(
-                new ApiResponse(200, { user, accessToken, refreshToken: newRefreshToken }, "Access token refreshed")
+                new ApiResponse(200, { user: safeUser, accessToken, refreshToken: newRefreshToken }, "Access token refreshed")
             );
     } catch (error) {
         if (error.name === "TokenExpiredError") {

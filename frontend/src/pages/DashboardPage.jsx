@@ -10,18 +10,18 @@ const DashboardPage = () => {
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
-    useEffect(() => {
-        const fetchTasks = async () => {
-            try {
-                const res = await contractService.getUserContracts();
-                setTasks(res.data.contracts || []);
-            } catch (err) {
-                console.error("Failed to load tasks:", err);
-            } finally {
-                setLoading(false);
-            }
-        };
+    const fetchTasks = async () => {
+        try {
+            const res = await contractService.getUserContracts();
+            setTasks(res.data.contracts || []);
+        } catch (err) {
+            console.error("Failed to load tasks:", err);
+        } finally {
+            setLoading(false);
+        }
+    };
 
+    useEffect(() => {
         fetchTasks();
     }, []);
 
@@ -64,7 +64,7 @@ const DashboardPage = () => {
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {tasks.map(task => (
-                            <TaskCard key={task._id} task={task} />
+                            <TaskCard key={task._id} task={task} onRefetch={fetchTasks} />
                         ))}
                     </div>
                 )}
