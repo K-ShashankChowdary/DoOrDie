@@ -1,151 +1,205 @@
-import React, { useState } from 'react';
-import { format } from 'date-fns';
-import contractService from '../services/contract.service';
+import React, { useState } from "react";
+import { format } from "date-fns";
+import contractService from "../services/contract.service";
+import {
+  IconAlertCircle,
+  IconCalendar,
+  IconCreditCard,
+  IconIndianRupee,
+} from "./icons";
 
-// Lazily injects the Razorpay script tag once and resolves when it's ready.
 const loadRazorpayScript = () =>
-    new Promise((resolve) => {
-        if (window.Razorpay) return resolve(true);
-        const script = document.createElement('script');
-        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-        script.onload = () => resolve(true);
-        script.onerror = () => resolve(false);
-        document.body.appendChild(script);
-    });
+  new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+
+const STATUS = {
+  PENDING_PAYMENT: {
+    label: "To activate",
+    chipCls: "status-chip warning",
+    accent: "#f59e0b",
+    pulse: false,
+  },
+  ACTIVE: {
+    label: "In progress",
+    chipCls: "status-chip info",
+    accent: "#2563eb",
+    pulse: true,
+  },
+  VALIDATING: {
+    label: "In review",
+    chipCls: "status-chip info",
+    accent: "#0ea5e9",
+    pulse: false,
+  },
+  COMPLETED: {
+    label: "Done ✓",
+    chipCls: "status-chip success",
+    accent: "#10b981",
+    pulse: false,
+  },
+  FAILED: {
+    label: "Missed",
+    chipCls: "status-chip danger",
+    accent: "#ef4444",
+    pulse: false,
+  },
+};
 
 const TaskCard = ({ task, onRefetch }) => {
-    const { _id, title, description, stakeAmount, deadline, status, validator, creator } = task;
+  const { _id, title, description, stakeAmount, deadline, status } = task;
+  const [paying, setPaying] = useState(false);
+  const [payError, setPayError] = useState(null);
 
-    const [paying, setPaying] = useState(false);
-    const [payError, setPayError] = useState(null);
+  const cfg = STATUS[status] || STATUS.PENDING_PAYMENT;
+  const deadlineDate = new Date(deadline);
+  const isOverdue = deadlineDate < new Date() && status === "ACTIVE";
+  const isExpiredPending = deadlineDate < new Date() && status === "PENDING_PAYMENT";
 
-    const getStatusBadge = (s) => {
-        switch (s) {
-            case 'PENDING_PAYMENT': return <span className="badge badge-warning">Awaiting Payment</span>;
-            case 'ACTIVE':         return <span className="badge badge-info">Active</span>;
-            case 'VALIDATING':     return <span className="badge badge-info text-purple-600 bg-purple-100">Validating</span>;
-            case 'COMPLETED':      return <span className="badge badge-success">Completed</span>;
-            case 'FAILED':         return <span className="badge badge-danger">Failed</span>;
-            default:               return <span className="badge badge-warning">{s}</span>;
-        }
-    };
+  const handlePay = async () => {
+    setPayError(null);
+    setPaying(true);
+    try {
+      const orderRes = await contractService.generatePaymentOrder(_id);
+      const { order } = orderRes.data;
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) throw new Error("Failed to load Razorpay. Check your internet connection.");
+      await new Promise((resolve, reject) => {
+        const rzp = new window.Razorpay({
+          key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+          amount: order.amount,
+          currency: order.currency,
+          name: "DoOrDie",
+          description: title,
+          order_id: order.id,
+          theme: { color: "#2563eb" },
+          handler: async (resp) => {
+            try {
+              await contractService.verifyPayment({
+                razorpay_order_id: resp.razorpay_order_id,
+                razorpay_payment_id: resp.razorpay_payment_id,
+                razorpay_signature: resp.razorpay_signature,
+              });
+              if (onRefetch) await onRefetch();
+              resolve();
+            } catch (err) { reject(err); }
+          },
+          modal: { ondismiss: () => reject(new Error("DISMISSED")) },
+        });
+        rzp.on("payment.failed", (res) => reject(new Error(res.error?.description || "Payment failed")));
+        rzp.open();
+      });
+    } catch (err) {
+      if (err.message !== "DISMISSED") {
+        setPayError(err.response?.data?.message || err.message || "Payment failed");
+      }
+    } finally {
+      setPaying(false);
+    }
+  };
 
-    const isOverdue = new Date(deadline) < new Date() && status === 'ACTIVE';
+  return (
+    <div
+      className={`task-card-new${isOverdue ? " task-card-new--overdue" : ""}`}
+    >
+      {/* Top accent bar */}
+      <div
+        className="task-card-new__bar"
+        style={{ background: cfg.accent }}
+      />
 
-    // ── Payment flow ──────────────────────────────────────────────────────────
-    const handlePay = async () => {
-        setPayError(null);
-        setPaying(true);
-
-        try {
-            // 1. Create a Razorpay Order on the backend
-            const orderRes = await contractService.generatePaymentOrder(_id);
-            const { order, contractId } = orderRes.data;
-
-            // 2. Inject Razorpay checkout script
-            const scriptLoaded = await loadRazorpayScript();
-            if (!scriptLoaded) {
-                throw new Error('Failed to load Razorpay. Check your internet connection.');
-            }
-
-            // 3. Open Razorpay checkout modal
-            await new Promise((resolve, reject) => {
-                const options = {
-                    key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-                    amount: order.amount,          // already in paise from backend
-                    currency: order.currency,
-                    name: 'DoOrDie',
-                    description: title,
-                    order_id: order.id,
-                    theme: { color: '#E53E3E' },
-
-                    handler: async (razorpayResponse) => {
-                        try {
-                            // 4. Verify signature on our backend (HMAC SHA-256)
-                            await contractService.verifyPayment({
-                                razorpay_order_id:   razorpayResponse.razorpay_order_id,
-                                razorpay_payment_id: razorpayResponse.razorpay_payment_id,
-                                razorpay_signature:  razorpayResponse.razorpay_signature,
-                            });
-
-                            // 5. Refetch all tasks so the dashboard reflects the real DB state
-                            if (onRefetch) await onRefetch();
-                            resolve();
-                        } catch (err) {
-                            reject(err);
-                        }
-                    },
-
-                    modal: {
-                        // User closed the popup without paying — treat as cancellation, not error
-                        ondismiss: () => reject(new Error('DISMISSED')),
-                    },
-                };
-
-                const rzp = new window.Razorpay(options);
-                rzp.on('payment.failed', (res) => {
-                    reject(new Error(res.error?.description || 'Payment failed'));
-                });
-                rzp.open();
-            });
-
-        } catch (err) {
-            if (err.message !== 'DISMISSED') {
-                setPayError(err.response?.data?.message || err.message || 'Payment failed');
-            }
-        } finally {
-            setPaying(false);
-        }
-    };
-
-    return (
-        <div className={`card glass flex flex-col justify-between ${isOverdue ? 'border-red-400/50 shadow-sm shadow-red-500/10' : ''}`}>
-            <div>
-                <div className="flex justify-between items-start mb-3">
-                    <h3 className="text-lg font-semibold text-slate-800 line-clamp-1">{title}</h3>
-                    {getStatusBadge(status)}
-                </div>
-
-                <p className="text-sm text-slate-500 line-clamp-2 mb-4">
-                    {description || 'No description provided.'}
-                </p>
-            </div>
-
-            <div className="pt-4 border-t border-slate-100 text-sm flex items-center justify-between">
-                <div>
-                    <span className="block text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Stake</span>
-                    <span className="font-bold text-slate-700">₹{stakeAmount}</span>
-                </div>
-
-                <div className="text-right">
-                    <span className="block text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Deadline</span>
-                    <span className={`font-medium ${isOverdue ? 'text-brand-red' : 'text-slate-600'}`}>
-                        {format(new Date(deadline), 'MMM dd, yyyy - HH:mm')}
-                    </span>
-                </div>
-            </div>
-
-            {status === 'PENDING_PAYMENT' && (
-                <div className="mt-4 space-y-2">
-                    {payError && (
-                        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                            {payError}
-                        </p>
-                    )}
-                    <button
-                        onClick={handlePay}
-                        disabled={paying}
-                        className="btn btn-primary w-full text-sm py-2 flex items-center justify-center gap-2"
-                    >
-                        {paying
-                            ? <><span className="spinner w-4 h-4 !border-2 !border-white/30 !border-t-white"></span> Processing…</>
-                            : `Pay ₹${stakeAmount} to Activate`
-                        }
-                    </button>
-                </div>
+      <div className="task-card-new__inner">
+        {/* ── Header ── */}
+        <div className="task-card-new__head">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h3 className="task-card-new__title">{title}</h3>
+            {description && (
+              <p className="task-card-new__desc">{description}</p>
             )}
+          </div>
+          <span className={cfg.chipCls}>
+            {cfg.pulse && <span className="pulse-dot-sm" />}
+            {cfg.label}
+          </span>
         </div>
-    );
+
+        {/* ── Meta row ── */}
+        <div className="task-card-new__meta">
+          {/* Amount */}
+          <div className="task-meta-item">
+            <div className="task-meta-item__icon">
+              <IconIndianRupee className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="task-meta-item__label">Stake</p>
+              <p className="task-meta-item__value">₹{stakeAmount}</p>
+            </div>
+          </div>
+
+          {/* Deadline */}
+          <div className={`task-meta-item${isOverdue || isExpiredPending ? " task-meta-item--danger" : ""}`}>
+            <div className="task-meta-item__icon">
+              <IconCalendar className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="task-meta-item__label">Due</p>
+              <p className="task-meta-item__value">
+                {format(deadlineDate, "MMM dd, yyyy")}
+              </p>
+              <p className="task-meta-item__sub">
+                {format(deadlineDate, "HH:mm")}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Pay section ── */}
+        {status === "PENDING_PAYMENT" && (
+          <div className="task-card-new__pay">
+            {isExpiredPending ? (
+              <div className="task-card-new__expired">
+                <IconAlertCircle className="w-4 h-4" style={{ flexShrink: 0 }} />
+                <span>Deadline passed — this task can no longer be activated.</span>
+              </div>
+            ) : (
+              <>
+                {payError && (
+                  <div className="alert alert-error text-xs py-2" role="alert">
+                    <IconAlertCircle className="w-4 h-4 text-red-600" />
+                    <span>{payError}</span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  id={`pay-btn-${_id}`}
+                  onClick={handlePay}
+                  disabled={paying}
+                  className="task-card-new__pay-btn"
+                >
+                  {paying ? (
+                    <>
+                      <span className="spinner w-4 h-4 !border-2 !border-white/30 !border-t-white" />
+                      Processing…
+                    </>
+                  ) : (
+                    <>
+                      <IconCreditCard className="w-4 h-4" />
+                      Pay ₹{stakeAmount} to start
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 export default TaskCard;

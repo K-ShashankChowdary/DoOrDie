@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
 
@@ -20,7 +21,7 @@ export const AuthProvider = ({ children }) => {
             // Attempt to restore session
             const response = await api.post('/users/refresh-token');
             setUser(response.data.data.user);
-        } catch (error) {
+        } catch {
             // No valid session, or token expired/invalid
             setUser(null);
         } finally {
@@ -33,23 +34,15 @@ export const AuthProvider = ({ children }) => {
     }, []);
 
     const login = async (email, password) => {
-        try {
-            const response = await api.post('/users/login', { email, password });
-            setUser(response.data.data.user);
-            return response.data;
-        } catch (error) {
-            throw error;
-        }
+        const response = await api.post('/users/login', { email, password });
+        setUser(response.data.data.user);
+        return response.data;
     };
 
     const signup = async (userData) => {
-        try {
-            const response = await api.post('/users/signup', userData);
-            setUser(response.data.data.user);
-            return response.data;
-        } catch (error) {
-            throw error;
-        }
+        const response = await api.post('/users/signup', userData);
+        setUser(response.data.data.user);
+        return response.data;
     };
 
     const logout = async () => {
