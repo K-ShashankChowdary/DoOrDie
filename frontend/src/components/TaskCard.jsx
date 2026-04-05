@@ -1,11 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { format } from "date-fns";
 import contractService from "../services/contract.service";
+import { useAuth } from "../context/AuthContext";
+import SubmitProofModal from "./SubmitProofModal";
 import {
   IconAlertCircle,
   IconCalendar,
   IconCreditCard,
   IconIndianRupee,
+  IconUpload,
 } from "./icons";
 
 const loadRazorpayScript = () =>
@@ -52,9 +55,30 @@ const STATUS = {
 };
 
 const TaskCard = ({ task, onRefetch }) => {
+  const { user } = useAuth();
   const { _id, title, description, stakeAmount, deadline, status } = task;
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState(null);
+  const [isProofModalOpen, setIsProofModalOpen] = useState(false);
+
+  // Auto-refresh when the deadline exactly hits
+  useEffect(() => {
+    if (status === "ACTIVE") {
+      const msUntilDeadline = new Date(deadline).getTime() - Date.now();
+      if (msUntilDeadline > 0 && msUntilDeadline <= 2147483647) {
+        // Set a timer to trigger exactly when the deadline hits.
+        // We add a tiny 2-second buffer to guarantee the backend worker has already processed it.
+        const timer = setTimeout(() => {
+          if (onRefetch) onRefetch();
+        }, msUntilDeadline + 2000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [deadline, status, onRefetch]);
+
+  // Check if current user is the creator of this task
+  const taskCreatorId = typeof task.creator === 'object' ? task.creator._id : task.creator;
+  const isCreator = user && user._id === taskCreatorId;
 
   const cfg = STATUS[status] || STATUS.PENDING_PAYMENT;
   const deadlineDate = new Date(deadline);
@@ -197,7 +221,36 @@ const TaskCard = ({ task, onRefetch }) => {
             )}
           </div>
         )}
+
+        {status === "ACTIVE" && isOverdue && (
+          <div className="task-card-new__pay mt-4">
+            <div className="task-card-new__expired">
+              <IconAlertCircle className="w-4 h-4" style={{ flexShrink: 0 }} />
+              <span>Deadline passed — awaiting settlement.</span>
+            </div>
+          </div>
+        )}
+
+        {status === "ACTIVE" && isCreator && !isOverdue && (
+          <div className="task-card-new__pay mt-4">
+            <button
+              type="button"
+              onClick={() => setIsProofModalOpen(true)}
+              className="task-card-new__pay-btn"
+            >
+              <IconUpload className="w-4 h-4" />
+              Submit Proof of Work
+            </button>
+          </div>
+        )}
       </div>
+
+      <SubmitProofModal 
+          isOpen={isProofModalOpen} 
+          onClose={() => setIsProofModalOpen(false)} 
+          contractId={_id}
+          onSuccess={onRefetch}
+      />
     </div>
   );
 };

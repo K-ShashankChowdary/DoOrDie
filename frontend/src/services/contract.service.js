@@ -31,6 +31,18 @@ const contractService = {
         return response.data;
     },
 
+    // Get Cloudinary signed validation data for secure uploads
+    getUploadSignature: async () => {
+        const response = await api.get('/contracts/upload-signature');
+        return response.data;
+    },
+
+    // Submit Proof (images, links, text)
+    uploadProof: async (contractId, proofData) => {
+        const response = await api.post(`/contracts/${contractId}/upload-proof`, proofData);
+        return response.data;
+    },
+
     // Used dynamically in CreateTaskModal to search users via the backend
     searchValidators: async (query) => {
         const response = await api.get(`/users/search?query=${query}`);

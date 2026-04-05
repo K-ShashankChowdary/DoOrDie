@@ -8,6 +8,7 @@ import Razorpay from "razorpay";
 import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils.js";
 import { contractDeadlineQueue } from "../workers/deadline.worker.js";
 import { validatorGraceQueue } from "../workers/gracePeriod.worker.js";
+import { getUploadSignature as generateCloudinarySignature } from "../utils/cloudinary.js";
 
 // ============================================================================
 // 1. Initialize Razorpay
@@ -229,6 +230,7 @@ const verifyPayment = asyncHandler(async (req, res) => {
       { contractId: contract._id },
       { delay },
     );
+    console.log(`[Queue] Added 'check-contract-deadline' job for contract ${contract._id} (Execution in ${Math.round(delay / 60000)} minutes)`);
 
     return res
       .status(200)
@@ -351,6 +353,7 @@ const uploadProof = asyncHandler(async (req, res) => {
     { contractId: contract._id },
     { delay: gracePeriodDelay },
   );
+  console.log(`[Queue] Added 'check-grace-period' job for contract ${contract._id} (Execution in ${Math.round(gracePeriodDelay / (1000 * 60 * 60))} hours)`);
 
   return res
     .status(200)
@@ -453,6 +456,17 @@ const verifyProof = asyncHandler(async (req, res) => {
   }
 });
 
+// Generate Cloudinary signature for frontend uploads
+const getUploadSignature = asyncHandler(async (req, res) => {
+  const signatureData = generateCloudinarySignature();
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, signatureData, "Cloudinary upload signature generated"),
+    );
+});
+
 export {
   createContract,
   generatePaymentOrder,
@@ -461,4 +475,5 @@ export {
   getContractById,
   uploadProof,
   verifyProof,
+  getUploadSignature,
 };

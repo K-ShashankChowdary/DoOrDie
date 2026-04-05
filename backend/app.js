@@ -18,6 +18,20 @@ app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 app.use(express.static("public")); 
 app.use(cookieParser());
 
+// Request & Response Logging Middleware
+app.use((req, res, next) => {
+    const start = Date.now();
+    console.log(`\x1b[36m[${new Date().toLocaleTimeString()}] -> ${req.method} ${req.originalUrl}\x1b[0m`);
+    
+    res.on("finish", () => {
+        const duration = Date.now() - start;
+        const color = res.statusCode >= 400 ? '\x1b[31m' : '\x1b[32m'; // Red for errors, green for success
+        console.log(`${color}[${new Date().toLocaleTimeString()}] <- ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Duration: ${duration}ms\x1b[0m`);
+    });
+    
+    next();
+});
+
 //routes Import
 import userRouter from "./src/routes/user.routes.js";
 import contractRouter from "./src/routes/contract.routes.js";

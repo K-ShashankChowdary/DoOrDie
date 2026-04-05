@@ -6,7 +6,8 @@ import {
     getUserContracts,
     getContractById,
     uploadProof,
-    verifyProof
+    verifyProof,
+    getUploadSignature
 } from "../controllers/contract.controller.js";
 import { verifyJWT } from "../middleware/auth.middleware.js";
 
@@ -26,6 +27,10 @@ router.route("/pay/:contractId").post(generatePaymentOrder);
 // Verify the Razorpay Signature (Triggered after successful checkout)
 // POST: /api/v1/contracts/verify-payment
 router.route("/verify-payment").post(verifyPayment);
+
+// Get Cloudinary Upload Signature
+// GET: /api/v1/contracts/upload-signature
+router.route("/upload-signature").get(getUploadSignature);
 
 // Get all contracts associated with the logged-in user (Creator or Validator)
 // GET: /api/v1/contracts
