@@ -85,6 +85,13 @@ const TaskCard = ({ task, onRefetch }) => {
   const isOverdue = deadlineDate < new Date() && status === "ACTIVE";
   const isExpiredPending = deadlineDate < new Date() && status === "PENDING_PAYMENT";
 
+  // Force close the proof modal if the deadline hits while it's open
+  useEffect(() => {
+    if (isOverdue && isProofModalOpen) {
+      setIsProofModalOpen(false);
+    }
+  }, [isOverdue, isProofModalOpen]);
+
   const handlePay = async () => {
     setPayError(null);
     setPaying(true);

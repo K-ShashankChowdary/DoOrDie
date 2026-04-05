@@ -13,6 +13,10 @@ app.use(cors({
     credentials: true
 }));
 
+// Route webhooks BEFORE express.json() so they get raw Buffer for HMAC validation
+import webhookRouter from "./src/routes/webhook.routes.js";
+app.use("/api/v1/webhooks", express.raw({ type: "application/json" }), webhookRouter);
+
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 app.use(express.static("public")); 

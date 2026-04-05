@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import mongoose from "mongoose";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -53,6 +54,14 @@ const createContract = asyncHandler(async (req, res) => {
   // Prevent users from picking themselves as the judge, which would allow them to cheat
   if (req.user._id.toString() === validator.toString()) {
     throw new ApiError(400, "You cannot be your own validator");
+  }
+
+  // Enforce validator account linking
+  if (!isValidatorExist.razorpayLinkedAccountId) {
+    throw new ApiError(
+      400,
+      "The selected Validator does not have a linked Razorpay account to receive payouts."
+    );
   }
 
   // Create the contract but keep it PENDING until they actually pay
@@ -192,7 +201,6 @@ const verifyPayment = asyncHandler(async (req, res) => {
     ) {
       // Clean rollback if the rules dictate we shouldn't proceed
       await session.abortTransaction();
-      session.endSession();
       return res
         .status(200)
         .json(
@@ -467,6 +475,87 @@ const getUploadSignature = asyncHandler(async (req, res) => {
     );
 });
 
+// Handle Razorpay webhooks (e.g., payment.captured) to ensure robust payment status
+const razorpayWebhook = asyncHandler(async (req, res) => {
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  
+  if (!webhookSecret) {
+    console.error("RAZORPAY_WEBHOOK_SECRET is not defined in env");
+    return res.status(500).send("Webhook configuration missing");
+  }
+
+  const signature = req.headers["x-razorpay-signature"];
+
+  // req.body is the raw buffer since we used express.raw
+  const expectedSignature = crypto
+    .createHmac("sha256", webhookSecret)
+    .update(req.body)
+    .digest("hex");
+
+  if (expectedSignature !== signature) {
+    return res.status(400).send("Invalid signature");
+  }
+
+  // Parse the JSON payload now that signature is verified
+  const body = JSON.parse(req.body.toString());
+
+  if (body.event === "payment.captured") {
+    const paymentEntity = body.payload.payment.entity;
+    const razorpay_order_id = paymentEntity.order_id;
+    const razorpay_payment_id = paymentEntity.id;
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const contract = await Contract.findOne({
+        razorpayOrderId: razorpay_order_id,
+      }).session(session);
+
+      if (!contract) {
+        await session.abortTransaction();
+        return res.status(200).send("Contract not found associated with webhook payment");
+      }
+
+      if (
+        contract.status === "ACTIVE" ||
+        contract.razorpayPaymentId === razorpay_payment_id
+      ) {
+        await session.abortTransaction();
+        return res.status(200).send("Payment already authenticated and verified");
+      }
+
+      contract.status = "ACTIVE";
+      contract.razorpayPaymentId = razorpay_payment_id;
+
+      await contract.save({ validateBeforeSave: false, session });
+      await session.commitTransaction();
+
+      const delay = Math.max(
+        0,
+        new Date(contract.deadline).getTime() - Date.now(),
+      );
+      await contractDeadlineQueue.add(
+        "check-contract-deadline",
+        { contractId: contract._id },
+        { delay },
+      );
+      console.log(`[Queue] Webhook verified payment. Added job for contract ${contract._id}`);
+      
+    } catch (error) {
+      await session.abortTransaction();
+      console.error("[Webhook] Processing error: ", error);
+      // Razorpay expects a 200 unless we want them to violently retry. 
+      // It's usually safer to return 500 when our DB transaction fails, so Razorpay retries reliably.
+      throw new ApiError(500, "Webhook internal processing failed");
+    } finally {
+      session.endSession();
+    }
+  }
+
+  return res.status(200).send("Webhook processed successfully");
+});
+
 export {
   createContract,
   generatePaymentOrder,
@@ -476,4 +565,5 @@ export {
   uploadProof,
   verifyProof,
   getUploadSignature,
+  razorpayWebhook,
 };
