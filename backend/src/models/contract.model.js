@@ -50,13 +50,13 @@ const contractSchema = new Schema(
         proofText: {
             type: String,
         },
-        //payments order ID
-        razorpayOrderId: {
+        stripePaymentIntentId: {
             type: String,
+            trim: true,
         },
-        //payments paymentId
-        razorpayPaymentId: {
+        stripeTransferId: {
             type: String,
+            trim: true,
         }
     },
     {

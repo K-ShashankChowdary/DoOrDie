@@ -1,10 +1,11 @@
 import { Router } from "express";
-import { razorpayWebhook } from "../controllers/contract.controller.js";
-import { verifyRazorpaySignature } from "../middleware/razorpay.middleware.js";
+import { stripeWebhook } from "../controllers/webhook.controller.js";
 
 const router = Router();
 
-// /api/v1/webhooks/razorpay
-router.route("/razorpay").post(verifyRazorpaySignature, razorpayWebhook);
+// /api/v1/webhooks/stripe
+// Ingestion endpoint for Stripe events. 
+// Handled with internal signature verification and Redis idempotency.
+router.route("/stripe").post(stripeWebhook);
 
 export default router;

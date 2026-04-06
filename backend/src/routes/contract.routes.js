@@ -25,9 +25,9 @@ router.route("/new").post(createContract);
 // POST: /api/v1/contracts/pay/:contractId
 router.route("/pay/:contractId").post(generatePaymentOrder);
 
-// Verify the Razorpay Signature (Triggered after successful checkout)
-// POST: /api/v1/contracts/verify-payment
-router.route("/verify-payment").post(verifyPayment);
+// Verify the Stripe Hold (Triggered after successful checkout)
+// POST: /api/v1/contracts/verify-payment/:stripePaymentIntentId
+router.route("/verify-payment/:stripePaymentIntentId").post(verifyPayment);
 
 // Get Cloudinary Upload Signature
 // GET: /api/v1/contracts/upload-signature

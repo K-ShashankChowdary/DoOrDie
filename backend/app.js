@@ -39,10 +39,12 @@ app.use((req, res, next) => {
 //routes Import
 import userRouter from "./src/routes/user.routes.js";
 import contractRouter from "./src/routes/contract.routes.js";
+import taskRouter from "./src/routes/task.routes.js";
 
 // Routes mounting
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/contracts", contractRouter);
+app.use("/api/v1/tasks", taskRouter);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

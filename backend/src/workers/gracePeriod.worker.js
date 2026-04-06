@@ -1,82 +1,50 @@
-import { Worker, Queue } from 'bullmq';
-import { Contract } from '../models/contract.model.js';
-import mongoose from 'mongoose';
-import Redis from 'ioredis';
-import Razorpay from 'razorpay';
+import { Worker, Queue } from "bullmq";
+import { Contract } from "../models/contract.model.js";
+import { stripeService } from "../services/stripe.service.js";
+import { redisService as connection } from "../services/redis.service.js";
 
-// BullMQ Connection Setup
-const connection = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
-    maxRetriesPerRequest: null,
-});
-
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
-
-// The Queue Instance
-export const validatorGraceQueue = new Queue('validator-grace-period', { connection });
-
-// The Worker Instance: Auto-refunds creator if validator fails to evaluate proof within 24 hours of deadline
-export const gracePeriodWorker = new Worker('validator-grace-period', async job => {
+/**
+ * Worker to automatically handle ghosting validators.
+ * If a validator fails to evaluate proof within the grace period, 
+ * the creator "wins" by default and their hold is released.
+ */
+export const gracePeriodWorker = new Worker("validator-grace-period", async (job) => {
     const { contractId } = job.data;
     console.log(`[Worker] Checking grace period for contract: ${contractId}`);
-    
-    // Mongoose ACID Transaction
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    
-    try {
-        const contract = await Contract.findById(contractId).session(session);
-        
-        if (!contract) {
-            console.warn(`[Worker] Contract ${contractId} not found`);
-            await session.abortTransaction();
-            return;
-        }
 
-        // If the contract is still stuck in VALIDATING state
-        if (contract.status === "VALIDATING") {
-            
-            // 1. Process Full Refund to Creator
-            if (contract.razorpayPaymentId) {
-                // 1. Process Full Refund to Creator with Idempotency protection
-                await razorpay.payments.refund(contract.razorpayPaymentId, {
-                    notes: {
-                        reason: "Validator no-show grace period expired. Auto-refunding creator.",
-                        contractId: contract._id.toString()
-                    },
-                    speed: "optimum" // Fast refund for creator
-                }, {
-                    "X-Refund-Idempotency": `refund_${contract._id.toString()}`
-                });
-                console.log(`[Worker] Refund issued for payment ${contract.razorpayPaymentId}`);
-            }
+    // 1. Use Atomic Update Pattern to ensure we only process if still in VALIDATING
+    // Why: Prevents race conditions where a validator finishes review at the same instant.
+    const releasedContract = await Contract.findOneAndUpdate(
+        { 
+            _id: contractId, 
+            status: "VALIDATING" 
+        },
+        { 
+            $set: { status: "COMPLETED" } 
+        },
+        { new: true }
+    );
 
-            // 2. Mark as completed (Creator wins by default)
-            contract.status = "COMPLETED";
-            await contract.save({ session, validateBeforeSave: false });
-            console.log(`[Worker] Contract ${contractId} grace period expired. Status automatically updated to COMPLETED.`);
-            
-        } else {
-             console.log(`[Worker] Contract ${contractId} is in status ${contract.status}. No grace period action needed.`);
-        }
-
-        await session.commitTransaction();
-    } catch (error) {
-        console.error(`[Worker] Failed assessing grace period for contract ${contractId}:`, error);
-        await session.abortTransaction();
-        throw error;
-    } finally {
-        session.endSession();
+    if (!releasedContract) {
+        console.log(`[Worker] Contract ${contractId} is not in VALIDATING status. Skipping.`);
+        return;
     }
+
+    // 2. Release the Authorized Hold (Funds go back to creator)
+    if (releasedContract.stripePaymentIntentId) {
+        await stripeService.cancelHold(releasedContract.stripePaymentIntentId);
+        console.log(`[Worker] Stripe Authorized hold CANCELED (released) for contract ${releasedContract._id} (Grace Period Expired)`);
+    } else {
+        console.error(`[Worker] CRITICAL: Contract ${releasedContract._id} missing stripePaymentIntentId.`);
+    }
+
+    console.log(`[Worker] Contract ${contractId} grace period expired. Status: COMPLETED (Creator Won).`);
 }, { connection });
 
-gracePeriodWorker.on('completed', job => {
+gracePeriodWorker.on("completed", (job) => {
     console.log(`[Worker] Grace period check job ${job.id} has completed!`);
 });
 
-gracePeriodWorker.on('failed', (job, err) => {
+gracePeriodWorker.on("failed", (job, err) => {
     console.error(`[Worker] Grace period check job ${job?.id} has failed: ${err.message}`);
 });

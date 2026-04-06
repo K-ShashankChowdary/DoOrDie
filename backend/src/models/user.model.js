@@ -26,9 +26,14 @@ const userSchema = new Schema(
             type: String,
             trim: true,
         },
-        razorpayLinkedAccountId: {
+        stripeAccountId: {
             type: String,
             trim: true,
+            sparse: true, // Only index records where stripeAccountId is defined
+        },
+        stripeOnboardingComplete: {
+            type: Boolean,
+            default: false
         },
         refreshToken: {
             type: String

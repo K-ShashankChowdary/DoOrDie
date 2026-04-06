@@ -1,88 +1,89 @@
-import { Worker, Queue } from 'bullmq';
-import { Contract } from '../models/contract.model.js';
-import mongoose from 'mongoose';
-import Redis from 'ioredis';
-import Razorpay from 'razorpay';
+import { Worker } from "bullmq";
+import { Contract } from "../models/contract.model.js";
+import { stripeService } from "../services/stripe.service.js";
+import { redisService as connection } from "../services/redis.service.js";
 
-// BullMQ Connection Setup
-// We use ioredis to establish a robust connection to our Redis instance.
-// maxRetriesPerRequest: null is required by BullMQ to prevent connection timeouts.
-const connection = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
-    maxRetriesPerRequest: null,
-});
-
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
-
-// The Queue Instance: This allows other files (like contract.controller.js) 
-// to push new delayed jobs into the queue.
-export const contractDeadlineQueue = new Queue('contract-deadlines', { connection });
-
-// The Worker Instance: Constantly polls Redis for jobs that are ready to process.
-// When a delayed job reaches its execution time (the contract's deadline), this code runs automatically.
-export const deadlineWorker = new Worker('contract-deadlines', async job => {
+/**
+ * Worker to handle automated task settlement when the deadline expires.
+ * 
+ * Why: This ensures that creators are held accountable even if a validator 
+ * doesn't manually review the task, and that validators receive their 
+ * stake payout for any failed tasks.
+ */
+export const deadlineWorker = new Worker("task-deadline-queue", async (job) => {
     const { contractId } = job.data;
-    console.log(`[Worker] Checking deadline for contract: ${contractId}`);
-    
-    // We initiate a Mongoose ACID Transaction to safely evaluate the contract's outcome.
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    
-    try {
-        // Find the contract within the atomic lock
-        const contract = await Contract.findById(contractId).populate("validator").session(session);
-        
-        if (!contract) {
-            console.warn(`[Worker] Contract ${contractId} not found`);
-            await session.abortTransaction();
-            return;
-        }
+    console.log(`[Worker] Processing deadline for contract: ${contractId}`);
 
-        // Core Game Logic: 
-        // If the contract is exactly in 'ACTIVE' status when the deadline arrives, 
-        // it means the creator completely failed to upload any proof in time.
-        // If it was 'VALIDATING' (proof uploaded), 'COMPLETED', or 'FAILED', we ignore it.
-        if (contract.status === "ACTIVE") {
-            contract.status = "FAILED";
-            await contract.save({ session, validateBeforeSave: false });
-            console.log(`[Worker] Contract ${contractId} missed deadline. Status automatically updated to FAILED.`);
-            
-            if (contract.validator && contract.validator.razorpayLinkedAccountId) {
-                // Using X-Razorpay-Idempotency to prevent double-payouts on BullMQ job retries
-                await razorpay.transfers.create({
-                    account: contract.validator.razorpayLinkedAccountId,
-                    amount: Math.round(contract.stakeAmount * 100),
-                    currency: "INR",
-                    notes: { reason: "Creator missed deadline, validator earns stake.", contractId: contract._id.toString() }
-                }, {
-                    "X-Razorpay-Idempotency": `transfer_${contract._id.toString()}`
-                });
-                console.log(`[Worker] Transferred stake to validator ${contract.validator._id}`);
-            } else {
-                console.warn(`[Worker] Validator ${contract.validator?._id} has no linked Razorpay account for payout.`);
-            }
-        } else {
-             console.log(`[Worker] Contract ${contractId} is in status ${contract.status}. No automatic failure needed.`);
-        }
+    // 1. Retrieve the contract with the validator populated
+    const contract = await Contract.findById(contractId).populate("validator");
+    if (!contract) {
+        console.warn(`[Worker] Contract ${contractId} not found. Skipping.`);
+        return;
+    }
 
-        // Make it durable
-        await session.commitTransaction();
-    } catch (error) {
-        console.error(`[Worker] Failed assessing contract ${contractId}:`, error);
-        await session.abortTransaction();
-        // Throwing the error alerts BullMQ to retry the job according to its retry strategy
-        throw error;
-    } finally {
-        session.endSession();
+    // 2. Handle Case: Task was already COMPLETED by a validator
+    // In this case, we simply release the hold and void the PaymentIntent.
+    if (contract.status === "COMPLETED") {
+        console.log(`[Worker] Contract ${contractId} was COMPLETED. Releasing hold.`);
+        if (contract.stripePaymentIntentId) {
+            await stripeService.cancelHold(contract.stripePaymentIntentId);
+        }
+        return;
+    }
+
+    // 3. Handle Case: Task is still ACTIVE (or VALIDATING) after the deadline
+    // We use the Atomic Update Pattern to ensure only one process manages the failure.
+    // Why: Prevents race conditions where a validator completes a task at the same instant.
+    const failedContract = await Contract.findOneAndUpdate(
+        { 
+            _id: contractId, 
+            status: { $in: ["ACTIVE", "VALIDATING"] } 
+        },
+        { 
+            $set: { status: "FAILED" } 
+        },
+        { new: true }
+    ).populate("validator");
+
+    if (!failedContract) {
+        console.log(`[Worker] Contract ${contractId} status changed externally. No action needed.`);
+        return;
+    }
+
+    // 4. Capture Stake & Remit to Validator
+    // Only proceed if we have the necessary Stripe identifiers.
+    if (failedContract.stripePaymentIntentId && failedContract.validator?.stripeAccountId) {
+        // Calculate payouts
+        const platformFeePercentage = Number(process.env.PLATFORM_FEE_PERCENTAGE) || 10;
+        const totalStake = failedContract.stakeAmount;
+        const platformFee = totalStake * (platformFeePercentage / 100);
+        const payoutAmount = totalStake - platformFee;
+
+        console.log(`[Worker] Capturing hold for ${contractId}. Fee: ${platformFeePercentage}%. Payout: ₹${payoutAmount}.`);
+
+        // Capture hold and transfer directly to the validator's Connect account
+        const transfer = await stripeService.captureHoldAndTransfer(
+            failedContract.stripePaymentIntentId,
+            payoutAmount,
+            failedContract.validator.stripeAccountId,
+            `Payout for failed task: ${failedContract.title}`
+        );
+
+        // Record the transfer ID for auditing
+        failedContract.stripeTransferId = transfer.id;
+        await failedContract.save();
+
+        console.log(`[Worker] Settlement complete for ${contractId}. Transfer: ${transfer.id}`);
+    } else {
+        console.error(`[Worker] Critical Failure: Missing payment intent or validator account for ${contractId}`);
     }
 }, { connection });
 
-deadlineWorker.on('completed', job => {
-    console.log(`[Worker] Deadline check job ${job.id} has completed!`);
+// Observer event listeners for observability
+deadlineWorker.on("completed", (job) => {
+    console.log(`[Worker] Job ${job.id} completed successfully.`);
 });
 
-deadlineWorker.on('failed', (job, err) => {
-    console.error(`[Worker] Deadline check job ${job?.id} has failed with ${err.message}`);
+deadlineWorker.on("failed", (job, err) => {
+    console.error(`[Worker] Job ${job?.id} failed: ${err.message}`);
 });
