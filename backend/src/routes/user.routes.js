@@ -4,7 +4,8 @@ import {
     loginUser, 
     logoutUser, 
     refreshAccessToken,
-    searchUsers
+    searchUsers,
+    linkRazorpayAccount
 } from "../controllers/user.controller.js";
 import { verifyJWT } from "../middleware/auth.middleware.js";
 
@@ -21,5 +22,8 @@ router.route("/refresh-token").post(refreshAccessToken);
 
 // Search Users
 router.route("/search").get(verifyJWT, searchUsers);
+
+// Link Razorpay Account (Used so user can act as a validator)
+router.route("/link-razorpay").post(verifyJWT, linkRazorpayAccount);
 
 export default router;

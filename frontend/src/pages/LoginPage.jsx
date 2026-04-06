@@ -6,6 +6,7 @@ import {
   IconLock,
   IconMail,
 } from "../components/icons";
+import Footer from "../components/Footer";
 
 const LoginPage = () => {
   const [email, setEmail] = useState("");
@@ -33,8 +34,9 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="page-shell auth-page">
-      <div className="auth-card slide-in relative z-0">
+    <div className="flex flex-col min-h-screen bg-slate-50/40">
+      <div className="flex-1 flex flex-col items-center justify-center p-4 py-12">
+        <div className="auth-card slide-in relative z-0">
         <header className="auth-header">
           <p className="text-xs uppercase tracking-[0.25em] font-semibold text-[color:var(--brand-red)]">
             Sign In
@@ -117,7 +119,9 @@ const LoginPage = () => {
             Sign up
           </Link>
         </div>
+        </div>
       </div>
+      <Footer />
     </div>
   );
 };

@@ -3,12 +3,15 @@ import { format } from "date-fns";
 import contractService from "../services/contract.service";
 import { useAuth } from "../context/AuthContext";
 import SubmitProofModal from "./SubmitProofModal";
+import ReviewProofModal from "./ReviewProofModal";
 import {
   IconAlertCircle,
   IconCalendar,
   IconCreditCard,
   IconIndianRupee,
   IconUpload,
+  IconCheckCircle,
+  IconTrash,
 } from "./icons";
 
 const loadRazorpayScript = () =>
@@ -52,6 +55,12 @@ const STATUS = {
     accent: "#ef4444",
     pulse: false,
   },
+  REJECTED: {
+    label: "Rejected",
+    chipCls: "status-chip danger",
+    accent: "#ef4444",
+    pulse: false,
+  },
 };
 
 const TaskCard = ({ task, onRefetch }) => {
@@ -60,6 +69,8 @@ const TaskCard = ({ task, onRefetch }) => {
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState(null);
   const [isProofModalOpen, setIsProofModalOpen] = useState(false);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Auto-refresh when the deadline exactly hits
   useEffect(() => {
@@ -77,7 +88,7 @@ const TaskCard = ({ task, onRefetch }) => {
   }, [deadline, status, onRefetch]);
 
   // Check if current user is the creator of this task
-  const taskCreatorId = typeof task.creator === 'object' ? task.creator._id : task.creator;
+  const taskCreatorId = typeof task.creator === 'object' ? task.creator?._id : task.creator;
   const isCreator = user && user._id === taskCreatorId;
 
   const cfg = STATUS[status] || STATUS.PENDING_PAYMENT;
@@ -131,6 +142,20 @@ const TaskCard = ({ task, onRefetch }) => {
       }
     } finally {
       setPaying(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm("Are you sure you want to delete this pending task?")) return;
+    setIsDeleting(true);
+    try {
+      await contractService.deleteContract(_id);
+      if (onRefetch) onRefetch();
+    } catch (err) {
+      console.error("Failed to delete task:", err);
+      alert("Failed to delete task");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -224,6 +249,21 @@ const TaskCard = ({ task, onRefetch }) => {
                     </>
                   )}
                 </button>
+                {isCreator && (
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={isDeleting || paying}
+                    className="task-card-new__pay-btn !bg-white hover:!bg-slate-50 !text-slate-500 hover:!text-red-500 !border-slate-200 shadow-sm mt-2 transition-colors"
+                  >
+                    {isDeleting ? (
+                       <span className="spinner w-4 h-4 !border-2 !border-slate-400 !border-t-transparent" />
+                    ) : (
+                      <IconTrash className="w-4 h-4" />
+                    )}
+                    <span className="font-semibold">Delete Task</span>
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -250,12 +290,32 @@ const TaskCard = ({ task, onRefetch }) => {
             </button>
           </div>
         )}
+
+        {status === "VALIDATING" && !isCreator && (
+          <div className="task-card-new__pay mt-4">
+            <button
+              type="button"
+              onClick={() => setIsReviewModalOpen(true)}
+              className="task-card-new__pay-btn !bg-emerald-600 hover:!bg-emerald-700 !border-emerald-600 shadow-[var(--elev-1)] shadow-emerald-600/20"
+            >
+              <IconCheckCircle className="w-4 h-4" />
+              Review Proof
+            </button>
+          </div>
+        )}
       </div>
 
       <SubmitProofModal 
           isOpen={isProofModalOpen} 
           onClose={() => setIsProofModalOpen(false)} 
           contractId={_id}
+          onSuccess={onRefetch}
+      />
+
+      <ReviewProofModal
+          task={task}
+          isOpen={isReviewModalOpen}
+          onClose={() => setIsReviewModalOpen(false)}
           onSuccess={onRefetch}
       />
     </div>

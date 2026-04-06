@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import mongoose from "mongoose";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -401,7 +400,7 @@ const verifyProof = asyncHandler(async (req, res) => {
     // This prevents double-spend race conditions if the validator double-clicks the "Reject" button.
     contract = await Contract.findOneAndUpdate(
       { _id: contractId, status: "VALIDATING" },
-      { $set: { status: isApproved ? "COMPLETED" : "FAILED" } },
+      { $set: { status: isApproved ? "COMPLETED" : "REJECTED" } },
       { new: true, session },
     ).populate("validator");
 
@@ -416,9 +415,14 @@ const verifyProof = asyncHandler(async (req, res) => {
     if (isApproved) {
       // Success: Full Refund to the creator
       if (contract.razorpayPaymentId) {
+        // Use X-Refund-Idempotency header to prevent double-refunds during network retries
         await razorpay.payments.refund(contract.razorpayPaymentId, {
           notes: { reason: "Task successfully completed by creator." },
+          speed: "optimum" // Prioritize instant refund as per docs
+        }, {
+          "X-Refund-Idempotency": `refund_${contract._id.toString()}`
         });
+        console.log(`[Payout] Refund issued for contract ${contract._id}`);
       } else {
         // This should never happen in production — it means a contract was approved
         // without ever being paid for. Log it loudly for audit purposes.
@@ -428,13 +432,17 @@ const verifyProof = asyncHandler(async (req, res) => {
       }
     } else {
       // Failure: Transfer stake to validator
-      if (contract.validator.razorpayLinkedAccountId) {
+      if (contract.validator && contract.validator.razorpayLinkedAccountId) {
+        // Use X-Razorpay-Idempotency to prevent double-transfers
         await razorpay.transfers.create({
           account: contract.validator.razorpayLinkedAccountId,
           amount: Math.round(contract.stakeAmount * 100),
           currency: "INR",
           notes: { reason: "Creator failed task, validator earns stake." },
+        }, {
+          "X-Razorpay-Idempotency": `transfer_${contract._id.toString()}`
         });
+        console.log(`[Payout] Transfer issued to validator for contract ${contract._id}`);
       } else {
         console.warn(
           `[Payout] Validator ${contract.validator._id} has no linked Razorpay account for payout.`,
@@ -475,35 +483,51 @@ const getUploadSignature = asyncHandler(async (req, res) => {
     );
 });
 
+// Delete an unpaid contract (Triggered by Creator)
+const deleteContract = asyncHandler(async (req, res) => {
+  const { contractId } = req.params;
+
+  const contract = await Contract.findById(contractId);
+  if (!contract) {
+    throw new ApiError(404, "Contract not found");
+  }
+
+  // Only creator can delete their own contract
+  if (contract.creator.toString() !== req.user._id.toString()) {
+    throw new ApiError(403, "You can only delete your own tasks");
+  }
+
+  // Prevent users from deleting active or resolved contracts
+  if (contract.status !== "PENDING_PAYMENT") {
+    throw new ApiError(400, "Only unpaid pending tasks can be deleted");
+  }
+
+  await Contract.findByIdAndDelete(contractId);
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Contract deleted successfully"));
+});
+
 // Handle Razorpay webhooks (e.g., payment.captured) to ensure robust payment status
 const razorpayWebhook = asyncHandler(async (req, res) => {
-  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-  
-  if (!webhookSecret) {
-    console.error("RAZORPAY_WEBHOOK_SECRET is not defined in env");
-    return res.status(500).send("Webhook configuration missing");
+  // Signature and JSON parsing are already handled by verifyRazorpaySignature middleware
+  const body = req.parsedBody;
+  const event = body.event;
+  const paymentEntity = body.payload.payment.entity;
+  const razorpay_order_id = paymentEntity.order_id;
+  const razorpay_payment_id = paymentEntity.id;
+
+  if (event === "payment.authorized") {
+    // Payment is authorized but not yet captured. 
+    // We can log this to know which contracts are "getting ready".
+    console.log(`[Webhook] Payment AUTHORIZED for order ${razorpay_order_id}. Payment ID: ${razorpay_payment_id}`);
+    // No state change needed yet if we rely on capture for ACTIVATION.
   }
 
-  const signature = req.headers["x-razorpay-signature"];
-
-  // req.body is the raw buffer since we used express.raw
-  const expectedSignature = crypto
-    .createHmac("sha256", webhookSecret)
-    .update(req.body)
-    .digest("hex");
-
-  if (expectedSignature !== signature) {
-    return res.status(400).send("Invalid signature");
-  }
-
-  // Parse the JSON payload now that signature is verified
-  const body = JSON.parse(req.body.toString());
-
-  if (body.event === "payment.captured") {
-    const paymentEntity = body.payload.payment.entity;
-    const razorpay_order_id = paymentEntity.order_id;
-    const razorpay_payment_id = paymentEntity.id;
-
+  if (event === "payment.captured") {
+    console.log(`[Webhook] Payment CAPTURED for order ${razorpay_order_id}. Payment ID: ${razorpay_payment_id}`);
+    
     const session = await mongoose.startSession();
     session.startTransaction();
 
@@ -545,12 +569,15 @@ const razorpayWebhook = asyncHandler(async (req, res) => {
     } catch (error) {
       await session.abortTransaction();
       console.error("[Webhook] Processing error: ", error);
-      // Razorpay expects a 200 unless we want them to violently retry. 
-      // It's usually safer to return 500 when our DB transaction fails, so Razorpay retries reliably.
       throw new ApiError(500, "Webhook internal processing failed");
     } finally {
       session.endSession();
     }
+  }
+
+  if (event === "payment.failed") {
+    console.error(`[Webhook] Payment FAILED for order ${razorpay_order_id}. Reason: ${paymentEntity.error_description}`);
+    // Optional: notify user or update status to "FAILED_PAYMENT"
   }
 
   return res.status(200).send("Webhook processed successfully");
@@ -565,5 +592,6 @@ export {
   uploadProof,
   verifyProof,
   getUploadSignature,
+  deleteContract,
   razorpayWebhook,
 };

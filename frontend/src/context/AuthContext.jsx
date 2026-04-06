@@ -57,12 +57,20 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const linkRazorpay = async (payload = {}) => {
+        const response = await api.post('/users/link-razorpay', payload);
+        const { razorpayLinkedAccountId } = response.data.data;
+        setUser(prev => ({ ...prev, razorpayLinkedAccountId }));
+        return response.data;
+    };
+
     const value = {
         user,
         loading,
         login,
         logout,
         signup,
+        linkRazorpay,
         setUser
     };
 

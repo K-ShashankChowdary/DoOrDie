@@ -22,7 +22,7 @@ const contractSchema = new Schema(
         },
         status: {
             type: String,
-            enum: ["PENDING_PAYMENT", "ACTIVE", "VALIDATING", "COMPLETED", "FAILED"],
+            enum: ["PENDING_PAYMENT", "ACTIVE", "VALIDATING", "COMPLETED", "FAILED", "REJECTED"],
             default: "PENDING_PAYMENT"
         },
         creator: {

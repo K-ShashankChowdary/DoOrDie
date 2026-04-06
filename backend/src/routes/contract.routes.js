@@ -7,7 +7,8 @@ import {
     getContractById,
     uploadProof,
     verifyProof,
-    getUploadSignature
+    getUploadSignature,
+    deleteContract
 } from "../controllers/contract.controller.js";
 import { verifyJWT } from "../middleware/auth.middleware.js";
 
@@ -39,6 +40,10 @@ router.route("/").get(getUserContracts);
 // Get specific details for a single contract
 // GET: /api/v1/contracts/:contractId
 router.route("/:contractId").get(getContractById);
+
+// Delete an unpaid pending contract
+// DELETE: /api/v1/contracts/:contractId
+router.route("/:contractId").delete(deleteContract);
 
 // Upload visual proof of completion (Triggered by Creator)
 // POST: /api/v1/contracts/:contractId/upload-proof

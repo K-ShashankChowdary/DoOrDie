@@ -41,12 +41,15 @@ export const gracePeriodWorker = new Worker('validator-grace-period', async job 
             
             // 1. Process Full Refund to Creator
             if (contract.razorpayPaymentId) {
-                // Omitting 'amount' acts as a full refund
+                // 1. Process Full Refund to Creator with Idempotency protection
                 await razorpay.payments.refund(contract.razorpayPaymentId, {
                     notes: {
                         reason: "Validator no-show grace period expired. Auto-refunding creator.",
                         contractId: contract._id.toString()
-                    }
+                    },
+                    speed: "optimum" // Fast refund for creator
+                }, {
+                    "X-Refund-Idempotency": `refund_${contract._id.toString()}`
                 });
                 console.log(`[Worker] Refund issued for payment ${contract.razorpayPaymentId}`);
             }

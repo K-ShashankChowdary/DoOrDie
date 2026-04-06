@@ -47,6 +47,12 @@ const contractService = {
     searchValidators: async (query) => {
         const response = await api.get(`/users/search?query=${query}`);
         return response.data;
+    },
+
+    // Accept or reject the proof (Validator only)
+    verifyProof: async (contractId, approvalData) => {
+        const response = await api.post(`/contracts/${contractId}/verify-proof`, approvalData);
+        return response.data;
     }
 };
 

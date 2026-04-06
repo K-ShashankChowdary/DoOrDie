@@ -50,11 +50,14 @@ export const deadlineWorker = new Worker('contract-deadlines', async job => {
             console.log(`[Worker] Contract ${contractId} missed deadline. Status automatically updated to FAILED.`);
             
             if (contract.validator && contract.validator.razorpayLinkedAccountId) {
+                // Using X-Razorpay-Idempotency to prevent double-payouts on BullMQ job retries
                 await razorpay.transfers.create({
                     account: contract.validator.razorpayLinkedAccountId,
                     amount: Math.round(contract.stakeAmount * 100),
                     currency: "INR",
-                    notes: { reason: "Creator missed deadline, validator earns stake." }
+                    notes: { reason: "Creator missed deadline, validator earns stake.", contractId: contract._id.toString() }
+                }, {
+                    "X-Razorpay-Idempotency": `transfer_${contract._id.toString()}`
                 });
                 console.log(`[Worker] Transferred stake to validator ${contract.validator._id}`);
             } else {
