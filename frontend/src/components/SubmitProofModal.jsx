@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import contractService from '../services/contract.service';
 
 const SubmitProofModal = ({ contractId, isOpen, onClose, onSuccess }) => {
-    const [file, setFile] = useState(null);
+    const [files, setFiles] = useState([]);
     const [link, setLink] = useState('');
     const [description, setDescription] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -12,10 +12,29 @@ const SubmitProofModal = ({ contractId, isOpen, onClose, onSuccess }) => {
     if (!isOpen) return null;
 
     const handleFileChange = (e) => {
-        setFile(e.target.files[0]);
+        const selectedFiles = Array.from(e.target.files);
+        // Map to internal format with previews
+        const newFiles = selectedFiles.map(file => ({
+            file,
+            id: Math.random().toString(36).substr(2, 9),
+            preview: URL.createObjectURL(file)
+        }));
+        setFiles(prev => [...prev, ...newFiles]);
+        // Clear input so same file can be selected again if removed
+        e.target.value = '';
     };
 
-    const hasValidProof = file || link.trim() !== '' || description.trim() !== '';
+    const removeFile = (id) => {
+        setFiles(prev => {
+            const filtered = prev.filter(f => f.id !== id);
+            // Clean up object URLs to prevent memory leaks
+            const removed = prev.find(f => f.id === id);
+            if (removed) URL.revokeObjectURL(removed.preview);
+            return filtered;
+        });
+    };
+
+    const hasValidProof = files.length > 0 || link.trim() !== '' || description.trim() !== '';
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -28,43 +47,46 @@ const SubmitProofModal = ({ contractId, isOpen, onClose, onSuccess }) => {
 
         setIsSubmitting(true);
         try {
-            let uploadedImageUrl = null;
+            let uploadedImageUrls = [];
 
-            if (file) {
+            if (files.length > 0) {
                 // 1. Get Signature & Cloudinary creds from backend
                 const sigRes = await contractService.getUploadSignature();
                 const { signature, timestamp, cloudName, apiKey } = sigRes.data;
 
-                // 2. Upload to Cloudinary
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('signature', signature);
-                formData.append('timestamp', timestamp);
-                formData.append('api_key', apiKey);
-                formData.append('folder', 'doordie_proofs'); // Must match backend
+                // 2. Upload all files to Cloudinary in parallel
+                const uploadPromises = files.map(async (fileObj) => {
+                    const formData = new FormData();
+                    formData.append('file', fileObj.file);
+                    formData.append('signature', signature);
+                    formData.append('timestamp', timestamp);
+                    formData.append('api_key', apiKey);
+                    formData.append('folder', 'doordie_proofs');
 
-                const cloudinaryRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-                    method: 'POST',
-                    body: formData,
+                    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error?.message || 'Upload failed');
+                    return data.secure_url;
                 });
 
-                const cloudinaryData = await cloudinaryRes.json();
-                
-                if (!cloudinaryRes.ok) {
-                    throw new Error(cloudinaryData.error?.message || 'Failed to upload image to Cloudinary');
-                }
-
-                uploadedImageUrl = cloudinaryData.secure_url;
+                uploadedImageUrls = await Promise.all(uploadPromises);
             }
 
             // 3. Submit proof to backend
             const proofData = {
-                proofImages: uploadedImageUrl ? [uploadedImageUrl] : [],
+                proofImages: uploadedImageUrls,
                 proofLinks: link.trim() ? [link.trim()] : [],
                 proofText: description.trim(),
             };
 
             await contractService.uploadProof(contractId, proofData);
+            
+            // Clean up URLs
+            files.forEach(f => URL.revokeObjectURL(f.preview));
             
             if (onSuccess) onSuccess();
             onClose();
@@ -79,7 +101,10 @@ const SubmitProofModal = ({ contractId, isOpen, onClose, onSuccess }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm slide-in">
             <div className="modal-panel w-full max-w-md flex flex-col gap-6">
                 <div className="flex items-center justify-between">
-                    <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Submit Proof</h2>
+                    <div>
+                        <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Submit Proof</h2>
+                        <p className="text-sm text-slate-500 mt-1">Upload evidence of your work</p>
+                    </div>
                     <button onClick={onClose} className="modal-close">
                         <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>
                     </button>
@@ -93,23 +118,48 @@ const SubmitProofModal = ({ contractId, isOpen, onClose, onSuccess }) => {
                         </div>
                     )}
 
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div>
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                        <div className="space-y-3">
                             <label className="label">
-                                Upload Screenshot / Image
+                                Screenshot / Images
                             </label>
-                            <input
-                                type="file"
-                                accept="image/*"
-                                onChange={handleFileChange}
-                                className="block w-full text-sm text-gray-600
-                                    file:mr-4 file:py-2 file:px-4
-                                    file:rounded-xl file:border-0
-                                    file:text-sm file:font-semibold
-                                    file:bg-blue-50 file:text-blue-600
-                                    hover:file:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50
-                                    transition-all"
-                            />
+                            
+                            {/* Selected Files Preview */}
+                            {files.length > 0 && (
+                                <div className="grid grid-cols-3 gap-2 mb-2">
+                                    {files.map((f) => (
+                                        <div key={f.id} className="relative aspect-square rounded-lg overflow-hidden border border-slate-200 group">
+                                            <img src={f.preview} alt="preview" className="w-full h-full object-cover" />
+                                            <button 
+                                                type="button"
+                                                onClick={() => removeFile(f.id)}
+                                                className="absolute top-1 right-1 p-1 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                                            >
+                                                <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="relative">
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    onChange={handleFileChange}
+                                    className="hidden"
+                                    id="proof-upload"
+                                />
+                                <label 
+                                    htmlFor="proof-upload"
+                                    className="flex flex-col items-center justify-center w-full py-6 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all"
+                                >
+                                    <svg className="w-8 h-8 text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+                                    <span className="text-sm font-medium text-slate-600">Click to add photos</span>
+                                    <span className="text-xs text-slate-400 mt-1">Select multiple if needed</span>
+                                </label>
+                            </div>
                         </div>
 
                         <div>
@@ -153,7 +203,7 @@ const SubmitProofModal = ({ contractId, isOpen, onClose, onSuccess }) => {
                                 className="btn btn-primary flex items-center gap-2"
                             >
                                 {isSubmitting && <span className="spinner w-4 h-4 !border-2 !border-white/30 !border-t-white" />}
-                                {isSubmitting ? 'Submitting...' : 'Submit Proof'}
+                                {isSubmitting ? `Uploading (${files.length})...` : 'Submit Proof'}
                             </button>
                         </div>
                     </form>

@@ -29,9 +29,23 @@ const DashboardPage = () => {
             setLoading(false);
         }
     };
+    const { verifyStripeStatus } = useAuth();
 
     useEffect(() => {
         fetchTasks();
+        
+        // Detect redirect from Stripe Onboarding
+        const urlParams = new URLSearchParams(window.location.search);
+        const onboardingStatus = urlParams.get('stripe_onboarding');
+
+        if (onboardingStatus === 'success') {
+            verifyStripeStatus().then(() => {
+                // Clear query params to prevent re-verification on reload
+                window.history.replaceState({}, document.title, "/dashboard");
+            }).catch(err => {
+                console.error("Failed to verify Stripe status:", err);
+            });
+        }
     }, []);
 
     const handleTaskCreated = (newTask) => {
@@ -41,11 +55,18 @@ const DashboardPage = () => {
     const firstName = user?.fullName?.split(' ')[0] || 'there';
 
     // Only creator tasks
-    const displayedTasks = useMemo(() => tasks.filter(t => t.creator === user?._id || t.creator?._id === user?._id), [tasks, user]);
+    const displayedTasks = useMemo(() => {
+        return tasks.filter(t => {
+            const creatorId = typeof t.creator === 'object' ? t.creator?._id : t.creator;
+            return creatorId?.toString() === user?._id?.toString();
+        });
+    }, [tasks, user]);
 
     const { activeCount, pendingCount, doneCount } = useMemo(() => ({
-        activeCount: displayedTasks.filter(t => t.status === 'ACTIVE').length,
-        pendingCount: displayedTasks.filter(t => t.status === 'PENDING_PAYMENT').length,
+        // Creator's "In Progress" includes both ACTIVE and VALIDATING (In Review)
+        activeCount: displayedTasks.filter(t => t.status === 'ACTIVE' || t.status === 'VALIDATING').length,
+        // Only count tasks that can still be activated (PENDING_PAYMENT and deadline not passed)
+        pendingCount: displayedTasks.filter(t => t.status === 'PENDING_PAYMENT' && new Date(t.deadline) > new Date()).length,
         doneCount: displayedTasks.filter(t => t.status === 'COMPLETED').length,
     }), [displayedTasks]);
     

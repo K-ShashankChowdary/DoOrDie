@@ -21,7 +21,7 @@ router.use(verifyJWT);
 // POST: /api/v1/contracts/new
 router.route("/new").post(createContract);
 
-// Generate the Razorpay Order (Triggered when user clicks "Pay")
+// Generate the Stripe PaymentIntent (Triggered when user clicks "Pay")
 // POST: /api/v1/contracts/pay/:contractId
 router.route("/pay/:contractId").post(generatePaymentOrder);
 

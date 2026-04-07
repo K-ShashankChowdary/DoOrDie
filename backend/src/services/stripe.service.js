@@ -1,6 +1,17 @@
+import "dotenv/config";
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const secretKey = process.env.STRIPE_SECRET_KEY;
+
+if (!secretKey) {
+    throw new Error("CRITICAL: STRIPE_SECRET_KEY is missing in environment variables.");
+}
+
+if (secretKey.startsWith('pk_')) {
+    throw new Error("CRITICAL: STRIPE_SECRET_KEY is incorrectly set to a Publishable Key (pk_). Please use a Secret Key (sk_).");
+}
+
+const stripe = new Stripe(secretKey);
 
 /**
  * Service to handle all interactions with the Stripe API.
@@ -15,7 +26,7 @@ export const stripeService = {
     createAuthHold: async (amount, metadata = {}) => {
         return await stripe.paymentIntents.create({
             amount: Math.round(amount * 100), // Stripe expects amount in cents
-            currency: 'inr',
+            currency: 'usd',
             payment_method_types: ['card'],
             capture_method: 'manual',
             metadata
@@ -38,9 +49,11 @@ export const stripeService = {
         const chargeId = capturedIntent.latest_charge;
 
         // 3. Create the transfer (minus platform fee, which is handled in the worker)
+        // Important: currency must EXACTLY match the capturedIntent.currency 
+        // to satisfy the source_transaction requirement.
         return await stripe.transfers.create({
             amount: Math.round(amount * 100), // Stripe expects cents
-            currency: 'inr',
+            currency: capturedIntent.currency,
             destination: destinationAccountId,
             source_transaction: chargeId, // Critical for linked flow
             description: description
@@ -61,7 +74,7 @@ export const stripeService = {
     createTransfer: async (amount, destinationAccountId, description) => {
         return await stripe.transfers.create({
             amount: Math.round(amount * 100),
-            currency: 'inr',
+            currency: 'usd',
             destination: destinationAccountId,
             description
         });
@@ -91,6 +104,14 @@ export const stripeService = {
             return_url: returnUrl,
             type: 'account_onboarding',
         });
+    },
+
+    /**
+     * Retrieves account details for a Stripe Connected account.
+     * Used to verify if onboarding details have been submitted.
+     */
+    getAccount: async (accountId) => {
+        return await stripe.accounts.retrieve(accountId);
     },
 
     /**

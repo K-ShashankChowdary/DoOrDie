@@ -67,6 +67,15 @@ export const AuthProvider = ({ children }) => {
         return response.data;
     };
 
+    const verifyStripeStatus = async () => {
+        const response = await api.get('/users/verify-stripe');
+        const { stripeOnboardingComplete } = response.data.data;
+        if (stripeOnboardingComplete) {
+            setUser(prev => ({ ...prev, stripeOnboardingComplete: true }));
+        }
+        return response.data;
+    };
+
     const value = {
         user,
         loading,
@@ -74,6 +83,7 @@ export const AuthProvider = ({ children }) => {
         logout,
         signup,
         linkStripe,
+        verifyStripeStatus,
         setUser
     };
 

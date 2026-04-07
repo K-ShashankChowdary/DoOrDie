@@ -19,9 +19,27 @@ const contractService = {
         return response.data;
     },
 
-    // Step 1 of payment: Create a new task and get a Stripe PaymentIntent client_secret
+    // Step 1 of payment: Generate a Stripe PaymentIntent (client_secret) for an existing contract
+    generatePaymentIntent: async (contractId) => {
+        const response = await api.post(`/contracts/pay/${contractId}`);
+        return response.data;
+    },
+
+    // Step 1 of payment (Legacy/Shortcut): Create a new task and get a Stripe PaymentIntent
     startTask: async (taskData) => {
         const response = await api.post('/tasks/start', taskData);
+        return response.data;
+    },
+
+    // Step 2 of payment: Notify the backend that the Stripe hold is successful
+    verifyPayment: async (stripePaymentIntentId) => {
+        const response = await api.post(`/contracts/verify-payment/${stripePaymentIntentId}`);
+        return response.data;
+    },
+
+    // Delete a contract/task
+    deleteContract: async (contractId) => {
+        const response = await api.delete(`/contracts/${contractId}`);
         return response.data;
     },
 

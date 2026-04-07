@@ -14,10 +14,10 @@ const AppLayout = () => {
             try {
                 const res = await contractService.getUserContracts();
                 const tasks = res.data.contracts || [];
-                const count = tasks.filter(t => 
-                    (t.validator === user?._id || t.validator?._id === user?._id) && 
-                    t.status === 'VALIDATING'
-                ).length;
+                const count = tasks.filter(t => {
+                    const validatorId = typeof t.validator === 'object' ? t.validator?._id : t.validator;
+                    return validatorId?.toString() === user?._id?.toString() && t.status === 'VALIDATING';
+                }).length;
                 setValidationCount(count);
             } catch {
                 console.error("Failed to fetch notification badge");

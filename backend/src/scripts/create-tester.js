@@ -19,12 +19,10 @@ const createTester = async () => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const tester = await User.create({
-            fullName: "Razorpay Reviewer",
+            fullName: "Stripe Reviewer",
             email,
             password: hashedPassword,
-            upiId: "tester@okaxis",
-            // We pre-link a dummy account ID so the reviewer doesn't get blocked by the "Link Account" banner
-            razorpayLinkedAccountId: "acc_TESTER_001", 
+            upiId: "tester@okaxis"
         });
 
         console.log("------------------------------------------");

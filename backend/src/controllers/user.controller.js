@@ -181,9 +181,10 @@ const linkStripeAccount = asyncHandler(async (req, res) => {
     }
 
     // Generate onboarding link
-    // Note: In production, these URLs should be dynamic base on the frontend deployment
-    const refreshUrl = `${req.protocol}://${req.get('host')}/api/v1/users/stripe/refresh`;
-    const returnUrl = `${req.protocol}://${req.get('host')}/api/v1/users/stripe/return`;
+    // We redirect to the frontend dashboard with status flags
+    const baseUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
+    const refreshUrl = `${baseUrl}/dashboard?stripe_onboarding=refresh`;
+    const returnUrl = `${baseUrl}/dashboard?stripe_onboarding=success`;
 
     const accountLink = await stripeService.createAccountOnboardingLink(
         accountId,
@@ -196,4 +197,36 @@ const linkStripeAccount = asyncHandler(async (req, res) => {
     );
 });
 
-export { registerUser, loginUser, logoutUser, refreshAccessToken, searchUsers, linkStripeAccount };
+/**
+ * Checks Stripe account details and updates the user's stripeOnboardingComplete status.
+ * This is called when the user returns from the Stripe onboarding flow.
+ */
+const verifyStripeStatus = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user._id);
+    if (!user || !user.stripeAccountId) {
+        throw new ApiError(400, "User does not have a Stripe account to verify.");
+    }
+
+    const account = await stripeService.getAccount(user.stripeAccountId);
+
+    if (account.details_submitted) {
+        user.stripeOnboardingComplete = true;
+        await user.save({ validateBeforeSave: false });
+    }
+
+    return res.status(200).json(
+        new ApiResponse(
+            200, 
+            { 
+                stripeOnboardingComplete: user.stripeOnboardingComplete,
+                detailsSubmitted: account.details_submitted,
+                payoutsEnabled: account.payouts_enabled
+            }, 
+            user.stripeOnboardingComplete 
+                ? "Stripe onboarding successfully verified." 
+                : "Stripe onboarding not yet complete. Please ensure all details are submitted."
+        )
+    );
+});
+
+export { registerUser, loginUser, logoutUser, refreshAccessToken, searchUsers, linkStripeAccount, verifyStripeStatus };

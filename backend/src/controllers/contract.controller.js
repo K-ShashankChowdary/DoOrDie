@@ -47,11 +47,11 @@ const createContract = asyncHandler(async (req, res) => {
     throw new ApiError(400, "You cannot be your own validator");
   }
 
-  // Enforce Stripe validator account linking
-  if (!isValidatorExist.stripeAccountId) {
+  // Enforce Stripe validator account linking and detail submission
+  if (!isValidatorExist.stripeOnboardingComplete) {
     throw new ApiError(
       400,
-      "The selected Validator does not have a linked Stripe account to receive payouts."
+      "The selected Validator has not completed their Stripe onboarding to receive payouts."
     );
   }
 
@@ -174,13 +174,25 @@ const verifyPayment = asyncHandler(async (req, res) => {
 
     // Update the contract document
     contract.status = "ACTIVE";
-
     await contract.save({ validateBeforeSave: false, session });
     await session.commitTransaction();
 
-    // Add the BullMQ delayed job to auto-capture (fail) if deadline lapses
-    await queueService.scheduleTaskDeadline(contract._id, delay);
-    console.log(`[Queue] Hold confirmed for contract ${contract._id}`);
+    // 2. Add the BullMQ delayed job to auto-capture (fail) if deadline lapses
+    // This is a safety measure in case the validator never verifies the proof.
+    const delay = Math.max(0, new Date(contract.deadline).getTime() - Date.now());
+    
+    // We use a Promise.race with a timeout to prevent Redis connection issues from hanging the response.
+    try {
+      await Promise.race([
+        queueService.scheduleTaskDeadline(contract._id, delay),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Queue Timeout")), 5000))
+      ]);
+      console.log(`[Queue] Hold confirmed & deadline scheduled for contract ${contract._id} (Delay: ${delay}ms)`);
+    } catch (queueError) {
+      // We log the error but don't fail the request since the transaction is already committed.
+      // The task is active, but we should alert for manual settlement if the queue is down.
+      console.error(`[Queue] CRITICAL: Failed to schedule deadline for ${contract._id}:`, queueError.message);
+    }
 
     return res
       .status(200)
@@ -433,9 +445,13 @@ const deleteContract = asyncHandler(async (req, res) => {
     throw new ApiError(403, "You can only delete your own tasks");
   }
 
-  // Prevent users from deleting active or resolved contracts
-  if (contract.status !== "PENDING_PAYMENT") {
-    throw new ApiError(400, "Only unpaid pending tasks can be deleted");
+  // Only allow deletion for:
+  // 1. Unpaid drafts (PENDING_PAYMENT), regardless of deadline.
+  // 2. Finalized tasks (COMPLETED, REJECTED, FAILED).
+  // Restriction: Prevents deleting ACTIVE or VALIDATING tasks where funds are on hold.
+  const deletableStatuses = ["PENDING_PAYMENT", "COMPLETED", "REJECTED", "FAILED"];
+  if (!deletableStatuses.includes(contract.status)) {
+    throw new ApiError(400, `Tasks in ${contract.status} status cannot be deleted as they have active funds on hold.`);
   }
 
   await Contract.findByIdAndDelete(contractId);

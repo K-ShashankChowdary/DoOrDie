@@ -53,9 +53,12 @@ export const queueService = {
      */
     scheduleTaskDeadline: async (contractId, delayMs) => {
         return await taskDeadlineQueue.add(
-            `settle_contract_${contractId}`, 
+            "settle_contract", 
             { contractId }, 
-            { delay: Math.max(0, delayMs) }
+            { 
+                delay: Math.max(0, delayMs),
+                jobId: `settle_${contractId}` // Ensures only one settlement job exists per contract.
+            }
         );
     }
 };

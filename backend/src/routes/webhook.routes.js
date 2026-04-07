@@ -3,9 +3,9 @@ import { stripeWebhook } from "../controllers/webhook.controller.js";
 
 const router = Router();
 
-// /api/v1/webhooks/stripe
+// /api/v1/webhooks/stripe OR /webhook (via alias)
 // Ingestion endpoint for Stripe events. 
-// Handled with internal signature verification and Redis idempotency.
+router.route("/").post(stripeWebhook);
 router.route("/stripe").post(stripeWebhook);
 
 export default router;

@@ -13,6 +13,7 @@ import {
   IconUpload,
   IconCheckCircle,
   IconTrash,
+  IconActivity,
 } from "../icons";
 
 const STATUS = {
@@ -89,10 +90,17 @@ const TaskCard = ({ task, onRefetch }) => {
   const taskCreatorId = typeof task.creator === 'object' ? task.creator?._id : task.creator;
   const isCreator = user && user._id === taskCreatorId;
 
-  const cfg = STATUS[status] || STATUS.PENDING_PAYMENT;
+  const isExpiredPending = new Date(deadline) < new Date() && status === "PENDING_PAYMENT";
+  
+  const cfg = isExpiredPending ? {
+    label: "Expired",
+    chipCls: "status-chip danger",
+    accent: "#ef4444",
+    pulse: false,
+  } : (STATUS[status] || STATUS.PENDING_PAYMENT);
+  
   const deadlineDate = new Date(deadline);
   const isOverdue = deadlineDate < new Date() && status === "ACTIVE";
-  const isExpiredPending = deadlineDate < new Date() && status === "PENDING_PAYMENT";
 
   // Force close the proof modal if the deadline hits while it's open
   useEffect(() => {
@@ -111,8 +119,8 @@ const TaskCard = ({ task, onRefetch }) => {
     setInitError(null);
     setIsInitializing(true);
     try {
-      const res = await contractService.startTask({ contractId: _id });
-      setClientSecret(res.data.client_secret);
+      const res = await contractService.generatePaymentIntent(_id);
+      setClientSecret(res.data.clientSecret);
       setIsCheckoutOpen(true);
     } catch (err) {
       setInitError(err.response?.data?.message || err.message || "Failed to initialize payment");
@@ -122,7 +130,6 @@ const TaskCard = ({ task, onRefetch }) => {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm("Are you sure you want to delete this pending task?")) return;
     setIsDeleting(true);
     try {
       await contractService.deleteContract(_id);
@@ -147,10 +154,27 @@ const TaskCard = ({ task, onRefetch }) => {
             <h3 className="task-card-new__title">{title}</h3>
             {description && <p className="task-card-new__desc">{description}</p>}
           </div>
-          <span className={cfg.chipCls}>
-            {cfg.pulse && <span className="pulse-dot-sm" />}
-            {cfg.label}
-          </span>
+          <div className="flex flex-col items-end gap-2">
+            <span className={cfg.chipCls}>
+              {cfg.pulse && <span className="pulse-dot-sm" />}
+              {cfg.label}
+            </span>
+            {isCreator && (["PENDING_PAYMENT", "COMPLETED", "REJECTED", "FAILED"].includes(status)) && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={isDeleting}
+                title="Delete Task"
+                className="p-2 transition-all duration-200 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 group/del"
+              >
+                {isDeleting ? (
+                  <span className="spinner w-4 h-4 !border-2 !border-slate-300 !border-t-red-500" />
+                ) : (
+                  <IconTrash className="w-5 h-5" />
+                )}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Meta row */}
@@ -181,9 +205,10 @@ const TaskCard = ({ task, onRefetch }) => {
         {status === "PENDING_PAYMENT" && (
           <div className="task-card-new__pay">
             {isExpiredPending ? (
-              <div className="task-card-new__expired">
-                <IconAlertCircle className="w-4 h-4" style={{ flexShrink: 0 }} />
-                <span>Deadline passed — activation no longer possible.</span>
+              <div className="task-card-new__expired items-center text-center">
+                <IconAlertCircle className="w-5 h-5 text-red-500 mb-1" />
+                <span className="font-semibold">Activation window closed.</span>
+                <p className="text-[11px] opacity-70 mt-1">This draft can no longer be activated. Use the trash icon top-right to remove it.</p>
               </div>
             ) : (
               <>
@@ -212,21 +237,6 @@ const TaskCard = ({ task, onRefetch }) => {
                     </>
                   )}
                 </button>
-                {isCreator && (
-                  <button
-                    type="button"
-                    onClick={handleDelete}
-                    disabled={isDeleting || isInitializing}
-                    className="task-card-new__pay-btn !bg-white hover:!bg-slate-50 !text-slate-500 hover:!text-red-500 !border-slate-200 shadow-sm mt-2 transition-colors"
-                  >
-                    {isDeleting ? (
-                       <span className="spinner w-4 h-4 !border-2 !border-slate-400 !border-t-transparent" />
-                    ) : (
-                      <IconTrash className="w-4 h-4" />
-                    )}
-                    <span className="font-semibold">Discard Draft</span>
-                  </button>
-                )}
               </>
             )}
           </div>
@@ -241,12 +251,19 @@ const TaskCard = ({ task, onRefetch }) => {
           </div>
         )}
 
-        {status === "ACTIVE" && isCreator && !isOverdue && (
+        {status === "ACTIVE" && !isOverdue && (
           <div className="task-card-new__pay mt-4">
-            <button type="button" onClick={() => setIsProofModalOpen(true)} className="task-card-new__pay-btn">
-              <IconUpload className="w-4 h-4" />
-              Upload Proof
-            </button>
+            {isCreator ? (
+              <button type="button" onClick={() => setIsProofModalOpen(true)} className="task-card-new__pay-btn">
+                <IconUpload className="w-4 h-4" />
+                Upload Proof
+              </button>
+            ) : (
+              <div className="task-card-new__expired !bg-blue-50/50 !border-blue-100 !text-blue-700">
+                <IconActivity className="w-4 h-4 animate-pulse" />
+                <span className="font-semibold">Creator is currently working...</span>
+              </div>
+            )}
           </div>
         )}
 

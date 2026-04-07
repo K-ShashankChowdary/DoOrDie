@@ -32,11 +32,16 @@ const ValidationsPage = () => {
     const firstName = user?.fullName?.split(' ')[0] || 'there';
 
     // Only validation tasks
-    const validationTasks = useMemo(() => tasks.filter(t => t.validator === user?._id || t.validator?._id === user?._id), [tasks, user]);
+    const validationTasks = useMemo(() => {
+        return tasks.filter(t => {
+            const validatorId = typeof t.validator === 'object' ? t.validator?._id : t.validator;
+            return validatorId?.toString() === user?._id?.toString();
+        });
+    }, [tasks, user]);
 
     const { validatingCount, pendingCount, completedCount } = useMemo(() => ({
         validatingCount: validationTasks.filter(t => t.status === 'VALIDATING').length,
-        pendingCount: validationTasks.filter(t => t.status === 'PENDING_PAYMENT' || t.status === 'ACTIVE').length,
+        pendingCount: validationTasks.filter(t => t.status === 'ACTIVE').length,
         completedCount: validationTasks.filter(t => t.status === 'COMPLETED' || t.status === 'REJECTED' || t.status === 'FAILED').length,
     }), [validationTasks]);
     

@@ -16,6 +16,7 @@ app.use(cors({
 // Route webhooks BEFORE express.json() so they get raw Buffer for HMAC validation
 import webhookRouter from "./src/routes/webhook.routes.js";
 app.use("/api/v1/webhooks", express.raw({ type: "application/json" }), webhookRouter);
+app.use("/webhook", express.raw({ type: "application/json" }), webhookRouter); // Alias for Stripe CLI default
 
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ extended: true, limit: "16kb" }));
@@ -39,12 +40,10 @@ app.use((req, res, next) => {
 //routes Import
 import userRouter from "./src/routes/user.routes.js";
 import contractRouter from "./src/routes/contract.routes.js";
-import taskRouter from "./src/routes/task.routes.js";
 
 // Routes mounting
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/contracts", contractRouter);
-app.use("/api/v1/tasks", taskRouter);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

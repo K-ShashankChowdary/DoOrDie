@@ -4,6 +4,7 @@ import connectDB from "./src/db/index.js";
 import { app } from "./app.js";
 import "./src/workers/deadline.worker.js";
 import "./src/workers/gracePeriod.worker.js";
+import "./src/workers/stripe.worker.js";
 
 const startServer = async () => {
     try {
