@@ -19,15 +19,9 @@ const contractService = {
         return response.data;
     },
 
-    // Step 1 of payment: Ask the backend to create a Razorpay Order for this contract
-    generatePaymentOrder: async (contractId) => {
-        const response = await api.post(`/contracts/pay/${contractId}`);
-        return response.data;
-    },
-
-    // Step 2 of payment: Send Razorpay's callback data to the backend for HMAC verification
-    verifyPayment: async (paymentData) => {
-        const response = await api.post('/contracts/verify-payment', paymentData);
+    // Step 1 of payment: Create a new task and get a Stripe PaymentIntent client_secret
+    startTask: async (taskData) => {
+        const response = await api.post('/tasks/start', taskData);
         return response.data;
     },
 

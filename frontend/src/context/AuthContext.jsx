@@ -57,10 +57,13 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const linkRazorpay = async (payload = {}) => {
-        const response = await api.post('/users/link-razorpay', payload);
-        const { razorpayLinkedAccountId } = response.data.data;
-        setUser(prev => ({ ...prev, razorpayLinkedAccountId }));
+    const linkStripe = async () => {
+        const response = await api.post('/users/stripe-onboard');
+        const { onboardingUrl } = response.data.data;
+        if (onboardingUrl) {
+            // Redirect user to Stripe's hosted onboarding experience
+            window.location.href = onboardingUrl;
+        }
         return response.data;
     };
 
@@ -70,7 +73,7 @@ export const AuthProvider = ({ children }) => {
         login,
         logout,
         signup,
-        linkRazorpay,
+        linkStripe,
         setUser
     };
 

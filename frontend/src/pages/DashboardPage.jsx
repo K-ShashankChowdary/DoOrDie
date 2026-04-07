@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import contractService from '../services/contract.service';
-import TaskCard from '../components/TaskCard';
+import TaskCard from '../components/tasks/TaskCard';
 import CreateTaskModal from '../components/CreateTaskModal';
-import LinkRazorpayModal from '../components/LinkRazorpayModal';
+import LinkStripeModal from '../components/modals/LinkStripeModal';
 import {
     IconActivity,
     IconCheckCircle,
@@ -71,7 +71,7 @@ const DashboardPage = () => {
                     </div>
                 </header>
 
-                {!user?.razorpayLinkedAccountId && (
+                {!user?.stripeAccountId && (
                     <div className="mb-8 bg-red-50/50 border border-red-200 rounded-2xl p-6 sm:p-10 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-sm animate-in fade-in slide-in-from-top-2">
                         <div className="text-center sm:text-left">
                             <h3 className="text-red-900 font-bold text-xl flex items-center justify-center sm:justify-start gap-3">
@@ -163,8 +163,7 @@ const DashboardPage = () => {
                 />
             )}
 
-            <LinkRazorpayModal
-                user={user}
+            <LinkStripeModal
                 isOpen={isLinkModalOpen}
                 onClose={() => setIsLinkModalOpen(false)}
             />

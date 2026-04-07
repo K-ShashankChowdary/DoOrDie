@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { format } from "date-fns";
-import contractService from "../services/contract.service";
-import { useAuth } from "../context/AuthContext";
-import SubmitProofModal from "./SubmitProofModal";
-import ReviewProofModal from "./ReviewProofModal";
+import contractService from "../../services/contract.service";
+import { useAuth } from "../../context/AuthContext";
+import SubmitProofModal from "../SubmitProofModal";
+import ReviewProofModal from "../ReviewProofModal";
+import CheckoutModal from "../modals/CheckoutModal";
 import {
   IconAlertCircle,
   IconCalendar,
@@ -12,17 +13,7 @@ import {
   IconUpload,
   IconCheckCircle,
   IconTrash,
-} from "./icons";
-
-const loadRazorpayScript = () =>
-  new Promise((resolve) => {
-    if (window.Razorpay) return resolve(true);
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
+} from "../icons";
 
 const STATUS = {
   PENDING_PAYMENT: {
@@ -63,11 +54,21 @@ const STATUS = {
   },
 };
 
+/**
+ * TaskCard component for managing individual staking tasks.
+ * 
+ * Why: This component handles the lifecycle of a task from PENDING_PAYMENT to completion.
+ * It provides the trigger for the Stripe CheckoutModal for auth-and-hold staking.
+ */
 const TaskCard = ({ task, onRefetch }) => {
   const { user } = useAuth();
   const { _id, title, description, stakeAmount, deadline, status } = task;
-  const [paying, setPaying] = useState(false);
-  const [payError, setPayError] = useState(null);
+  
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [clientSecret, setClientSecret] = useState("");
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [initError, setInitError] = useState(null);
+
   const [isProofModalOpen, setIsProofModalOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -77,8 +78,6 @@ const TaskCard = ({ task, onRefetch }) => {
     if (status === "ACTIVE") {
       const msUntilDeadline = new Date(deadline).getTime() - Date.now();
       if (msUntilDeadline > 0 && msUntilDeadline <= 2147483647) {
-        // Set a timer to trigger exactly when the deadline hits.
-        // We add a tiny 2-second buffer to guarantee the backend worker has already processed it.
         const timer = setTimeout(() => {
           if (onRefetch) onRefetch();
         }, msUntilDeadline + 2000);
@@ -87,7 +86,6 @@ const TaskCard = ({ task, onRefetch }) => {
     }
   }, [deadline, status, onRefetch]);
 
-  // Check if current user is the creator of this task
   const taskCreatorId = typeof task.creator === 'object' ? task.creator?._id : task.creator;
   const isCreator = user && user._id === taskCreatorId;
 
@@ -103,45 +101,23 @@ const TaskCard = ({ task, onRefetch }) => {
     }
   }, [isOverdue, isProofModalOpen]);
 
-  const handlePay = async () => {
-    setPayError(null);
-    setPaying(true);
+  /**
+   * Initializes the Stripe payment flow by requesting a client_secret from the backend.
+   * 
+   * Why: The client_secret is a unique identifier for the PaymentIntent and is required
+   * for the frontend Stripe SDK to securely confirm the payment.
+   */
+  const handleStartPayment = async () => {
+    setInitError(null);
+    setIsInitializing(true);
     try {
-      const orderRes = await contractService.generatePaymentOrder(_id);
-      const { order } = orderRes.data;
-      const scriptLoaded = await loadRazorpayScript();
-      if (!scriptLoaded) throw new Error("Failed to load Razorpay. Check your internet connection.");
-      await new Promise((resolve, reject) => {
-        const rzp = new window.Razorpay({
-          key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-          amount: order.amount,
-          currency: order.currency,
-          name: "DoOrDie",
-          description: title,
-          order_id: order.id,
-          theme: { color: "#2563eb" },
-          handler: async (resp) => {
-            try {
-              await contractService.verifyPayment({
-                razorpay_order_id: resp.razorpay_order_id,
-                razorpay_payment_id: resp.razorpay_payment_id,
-                razorpay_signature: resp.razorpay_signature,
-              });
-              if (onRefetch) await onRefetch();
-              resolve();
-            } catch (err) { reject(err); }
-          },
-          modal: { ondismiss: () => reject(new Error("DISMISSED")) },
-        });
-        rzp.on("payment.failed", (res) => reject(new Error(res.error?.description || "Payment failed")));
-        rzp.open();
-      });
+      const res = await contractService.startTask({ contractId: _id });
+      setClientSecret(res.data.client_secret);
+      setIsCheckoutOpen(true);
     } catch (err) {
-      if (err.message !== "DISMISSED") {
-        setPayError(err.response?.data?.message || err.message || "Payment failed");
-      }
+      setInitError(err.response?.data?.message || err.message || "Failed to initialize payment");
     } finally {
-      setPaying(false);
+      setIsInitializing(false);
     }
   };
 
@@ -160,23 +136,16 @@ const TaskCard = ({ task, onRefetch }) => {
   };
 
   return (
-    <div
-      className={`task-card-new${isOverdue ? " task-card-new--overdue" : ""}`}
-    >
+    <div className={`task-card-new${isOverdue ? " task-card-new--overdue" : ""}`}>
       {/* Top accent bar */}
-      <div
-        className="task-card-new__bar"
-        style={{ background: cfg.accent }}
-      />
+      <div className="task-card-new__bar" style={{ background: cfg.accent }} />
 
       <div className="task-card-new__inner">
-        {/* ── Header ── */}
+        {/* Header */}
         <div className="task-card-new__head">
           <div style={{ minWidth: 0, flex: 1 }}>
             <h3 className="task-card-new__title">{title}</h3>
-            {description && (
-              <p className="task-card-new__desc">{description}</p>
-            )}
+            {description && <p className="task-card-new__desc">{description}</p>}
           </div>
           <span className={cfg.chipCls}>
             {cfg.pulse && <span className="pulse-dot-sm" />}
@@ -184,9 +153,8 @@ const TaskCard = ({ task, onRefetch }) => {
           </span>
         </div>
 
-        {/* ── Meta row ── */}
+        {/* Meta row */}
         <div className="task-card-new__meta">
-          {/* Amount */}
           <div className="task-meta-item">
             <div className="task-meta-item__icon">
               <IconIndianRupee className="w-4 h-4" />
@@ -197,55 +165,50 @@ const TaskCard = ({ task, onRefetch }) => {
             </div>
           </div>
 
-          {/* Deadline */}
           <div className={`task-meta-item${isOverdue || isExpiredPending ? " task-meta-item--danger" : ""}`}>
             <div className="task-meta-item__icon">
               <IconCalendar className="w-4 h-4" />
             </div>
             <div>
               <p className="task-meta-item__label">Due</p>
-              <p className="task-meta-item__value">
-                {format(deadlineDate, "MMM dd, yyyy")}
-              </p>
-              <p className="task-meta-item__sub">
-                {format(deadlineDate, "HH:mm")}
-              </p>
+              <p className="task-meta-item__value">{format(deadlineDate, "MMM dd, yyyy")}</p>
+              <p className="task-meta-item__sub">{format(deadlineDate, "HH:mm")}</p>
             </div>
           </div>
         </div>
 
-        {/* ── Pay section ── */}
+        {/* Action Section */}
         {status === "PENDING_PAYMENT" && (
           <div className="task-card-new__pay">
             {isExpiredPending ? (
               <div className="task-card-new__expired">
                 <IconAlertCircle className="w-4 h-4" style={{ flexShrink: 0 }} />
-                <span>Deadline passed — this task can no longer be activated.</span>
+                <span>Deadline passed — activation no longer possible.</span>
               </div>
             ) : (
               <>
-                {payError && (
+                {initError && (
                   <div className="alert alert-error text-xs py-2" role="alert">
                     <IconAlertCircle className="w-4 h-4 text-red-600" />
-                    <span>{payError}</span>
+                    <span>{initError}</span>
                   </div>
                 )}
                 <button
                   type="button"
                   id={`pay-btn-${_id}`}
-                  onClick={handlePay}
-                  disabled={paying}
+                  onClick={handleStartPayment}
+                  disabled={isInitializing}
                   className="task-card-new__pay-btn"
                 >
-                  {paying ? (
+                  {isInitializing ? (
                     <>
                       <span className="spinner w-4 h-4 !border-2 !border-white/30 !border-t-white" />
-                      Processing…
+                      Loading Secure Checkout…
                     </>
                   ) : (
                     <>
                       <IconCreditCard className="w-4 h-4" />
-                      Pay ₹{stakeAmount} to start
+                      Secure Stake Hold (₹{stakeAmount})
                     </>
                   )}
                 </button>
@@ -253,7 +216,7 @@ const TaskCard = ({ task, onRefetch }) => {
                   <button
                     type="button"
                     onClick={handleDelete}
-                    disabled={isDeleting || paying}
+                    disabled={isDeleting || isInitializing}
                     className="task-card-new__pay-btn !bg-white hover:!bg-slate-50 !text-slate-500 hover:!text-red-500 !border-slate-200 shadow-sm mt-2 transition-colors"
                   >
                     {isDeleting ? (
@@ -261,7 +224,7 @@ const TaskCard = ({ task, onRefetch }) => {
                     ) : (
                       <IconTrash className="w-4 h-4" />
                     )}
-                    <span className="font-semibold">Delete Task</span>
+                    <span className="font-semibold">Discard Draft</span>
                   </button>
                 )}
               </>
@@ -273,20 +236,16 @@ const TaskCard = ({ task, onRefetch }) => {
           <div className="task-card-new__pay mt-4">
             <div className="task-card-new__expired">
               <IconAlertCircle className="w-4 h-4" style={{ flexShrink: 0 }} />
-              <span>Deadline passed — awaiting settlement.</span>
+              <span>Awaiting settlement...</span>
             </div>
           </div>
         )}
 
         {status === "ACTIVE" && isCreator && !isOverdue && (
           <div className="task-card-new__pay mt-4">
-            <button
-              type="button"
-              onClick={() => setIsProofModalOpen(true)}
-              className="task-card-new__pay-btn"
-            >
+            <button type="button" onClick={() => setIsProofModalOpen(true)} className="task-card-new__pay-btn">
               <IconUpload className="w-4 h-4" />
-              Submit Proof of Work
+              Upload Proof
             </button>
           </div>
         )}
@@ -296,7 +255,7 @@ const TaskCard = ({ task, onRefetch }) => {
             <button
               type="button"
               onClick={() => setIsReviewModalOpen(true)}
-              className="task-card-new__pay-btn !bg-emerald-600 hover:!bg-emerald-700 !border-emerald-600 shadow-[var(--elev-1)] shadow-emerald-600/20"
+              className="task-card-new__pay-btn !bg-emerald-600 hover:!bg-emerald-700 !border-emerald-600"
             >
               <IconCheckCircle className="w-4 h-4" />
               Review Proof
@@ -305,18 +264,16 @@ const TaskCard = ({ task, onRefetch }) => {
         )}
       </div>
 
-      <SubmitProofModal 
-          isOpen={isProofModalOpen} 
-          onClose={() => setIsProofModalOpen(false)} 
-          contractId={_id}
-          onSuccess={onRefetch}
-      />
-
-      <ReviewProofModal
-          task={task}
-          isOpen={isReviewModalOpen}
-          onClose={() => setIsReviewModalOpen(false)}
-          onSuccess={onRefetch}
+      <SubmitProofModal isOpen={isProofModalOpen} onClose={() => setIsProofModalOpen(false)} contractId={_id} onSuccess={onRefetch} />
+      <ReviewProofModal task={task} isOpen={isReviewModalOpen} onClose={() => setIsReviewModalOpen(false)} onSuccess={onRefetch} />
+      
+      <CheckoutModal 
+        isOpen={isCheckoutOpen} 
+        onClose={() => setIsCheckoutOpen(false)} 
+        clientSecret={clientSecret}
+        taskTitle={title}
+        stakeAmount={stakeAmount}
+        onSuccess={onRefetch}
       />
     </div>
   );

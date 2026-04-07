@@ -31,9 +31,9 @@ const TermsPage = () => {
         <div>
           <h2 className="text-xl font-bold mb-3">4) Payments, Escrow, and Payouts</h2>
           <ul className="list-disc ml-5 space-y-2 text-slate-600">
-            <li>Payments and payouts run through Razorpay Route. By funding a task, you authorize us to hold and disburse funds per task outcome.</li>
-            <li>Creators must pay the stake before a task becomes active. Validators must have a linked Razorpay Route account to receive payouts.</li>
-            <li>Fees (if any) are shown at checkout; bank/card charges may apply.</li>
+            <li>Payments and payouts run through Stripe. By funding a task, you authorize us to hold and disburse funds per task outcome.</li>
+            <li>Creators must pay the stake before a task becomes active. Validators must have a linked Stripe Connect account to receive payouts.</li>
+            <li>Stripe may require KYC to enable payouts. You agree to provide accurate documents if requested. Lack of KYC can delay or block payouts. Fees (if any) are shown at checkout; bank/card charges may apply.</li>
           </ul>
         </div>
 

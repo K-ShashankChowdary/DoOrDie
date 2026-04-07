@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import contractService from '../services/contract.service';
-import TaskCard from '../components/TaskCard';
-import LinkRazorpayModal from '../components/LinkRazorpayModal';
+import TaskCard from '../components/tasks/TaskCard';
 import {
     IconActivity,
     IconCheckCircle,
@@ -14,7 +13,6 @@ const ValidationsPage = () => {
     const { user } = useAuth();
     const [tasks, setTasks] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
 
     const fetchTasks = async () => {
         try {
