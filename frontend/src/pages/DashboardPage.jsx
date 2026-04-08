@@ -18,6 +18,9 @@ const DashboardPage = () => {
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+    const [balance, setBalance] = useState({ available: 0, pending: 0 });
+
+    const { getBalance, verifyStripeStatus } = useAuth();
 
     const fetchTasks = async () => {
         try {
@@ -29,10 +32,23 @@ const DashboardPage = () => {
             setLoading(false);
         }
     };
-    const { verifyStripeStatus } = useAuth();
+
+    const fetchBalance = async () => {
+        if (!user?.stripeAccountId) return;
+        try {
+            const res = await getBalance();
+            // The API returns { statusCode, data: { available, pending }, ... }
+            if (res && res.data) {
+                setBalance(res.data);
+            }
+        } catch (err) {
+            console.error("Failed to load balance:", err);
+        }
+    };
 
     useEffect(() => {
         fetchTasks();
+        fetchBalance();
         
         // Detect redirect from Stripe Onboarding
         const urlParams = new URLSearchParams(window.location.search);
@@ -40,13 +56,14 @@ const DashboardPage = () => {
 
         if (onboardingStatus === 'success') {
             verifyStripeStatus().then(() => {
+                fetchBalance();
                 // Clear query params to prevent re-verification on reload
                 window.history.replaceState({}, document.title, "/dashboard");
             }).catch(err => {
                 console.error("Failed to verify Stripe status:", err);
             });
         }
-    }, []);
+    }, [user?.stripeAccountId]);
 
     const handleTaskCreated = (newTask) => {
         setTasks(prev => [newTask, ...prev]);
@@ -113,33 +130,56 @@ const DashboardPage = () => {
                     </div>
                 )}
 
-                <section className="dashboard-hero grid grid-cols-1 sm:grid-cols-3 gap-4" aria-label="Task overview">
-                    <div className="stat-card stat-card--blue h-28">
+                <section className="dashboard-hero grid grid-cols-1 sm:grid-cols-4 gap-4" aria-label="Task overview">
+                    <div className="stat-card stat-card--blue h-32">
                         <div className="stat-card__head">
-                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">In progress</p>
+                            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">In Progress</p>
                             <div className="stat-card__icon-wrap" aria-hidden>
                                 <IconActivity className="w-4 h-4" />
                             </div>
                         </div>
                         <p className="text-3xl font-bold stat-value leading-none tabular-nums">{activeCount}</p>
                     </div>
-                    <div className="stat-card stat-card--amber h-28">
+                    <div className="stat-card stat-card--amber h-32">
                         <div className="stat-card__head">
-                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">To activate</p>
+                            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">To Activate</p>
                             <div className="stat-card__icon-wrap" aria-hidden>
                                 <IconWallet className="w-4 h-4" />
                             </div>
                         </div>
                         <p className="text-3xl font-bold stat-value leading-none tabular-nums">{pendingCount}</p>
                     </div>
-                    <div className="stat-card stat-card--emerald h-28">
+                    <div className="stat-card stat-card--emerald h-32">
                         <div className="stat-card__head">
-                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Done</p>
+                            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Done</p>
                             <div className="stat-card__icon-wrap" aria-hidden>
                                 <IconCheckCircle className="w-4 h-4" />
                             </div>
                         </div>
                         <p className="text-3xl font-bold stat-value leading-none tabular-nums">{doneCount}</p>
+                    </div>
+                    <div className="stat-card stat-card--wallet h-32">
+                        <div className="stat-card__head">
+                            <div className="balance-label">Total Balance</div>
+                            <div className="stat-card__icon-wrap">
+                                <IconWallet className="w-4 h-4" />
+                            </div>
+                        </div>
+                        <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                                <span className="text-3xl font-bold stat-value leading-none">
+                                    ${balance.available.toFixed(2)}
+                                </span>
+                            </div>
+                            {balance.pending > 0 && (
+                                <div className="pending-stripe">
+                                    <div className="pending-stripe__dot animate-pulse" />
+                                    <span className="pending-stripe__text">
+                                        + ${balance.pending.toFixed(2)} Pending
+                                    </span>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </section>
 

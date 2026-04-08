@@ -76,6 +76,11 @@ export const AuthProvider = ({ children }) => {
         return response.data;
     };
 
+    const getBalance = async () => {
+        const response = await api.get('/users/balance');
+        return response.data;
+    };
+
     const value = {
         user,
         loading,
@@ -84,6 +89,7 @@ export const AuthProvider = ({ children }) => {
         signup,
         linkStripe,
         verifyStripeStatus,
+        getBalance,
         setUser
     };
 

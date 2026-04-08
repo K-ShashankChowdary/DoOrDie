@@ -95,6 +95,27 @@ export const stripeService = {
     },
 
     /**
+     * Retrieves the balance for a specific connected account.
+     */
+    getAccountBalance: async (accountId) => {
+        // Direct API call to ensure Connect headers are perfectly handled
+        const res = await fetch('https://api.stripe.com/v1/balance', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+                'Stripe-Account': accountId
+            }
+        });
+        
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error?.message || "Stripe Balance Fetch Failed");
+        }
+        
+        return await res.json();
+    },
+
+    /**
      * Generates an onboarding link for a Stripe Express account.
      */
     createAccountOnboardingLink: async (accountId, refreshUrl, returnUrl) => {

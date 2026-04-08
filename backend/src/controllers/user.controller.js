@@ -229,4 +229,37 @@ const verifyStripeStatus = asyncHandler(async (req, res) => {
     );
 });
 
-export { registerUser, loginUser, logoutUser, refreshAccessToken, searchUsers, linkStripeAccount, verifyStripeStatus };
+/**
+ * Fetches the current balance from the user's linked Stripe account.
+ */
+const getUserBalance = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user._id);
+    
+    if (!user || !user.stripeAccountId) {
+        return res.status(200).json(
+            new ApiResponse(200, { available: 0, pending: 0 }, "No Stripe account linked")
+        );
+    }
+
+    try {
+        const balance = await stripeService.getAccountBalance(user.stripeAccountId);
+        
+        // Sum up the amounts (Stripe balance comes in an array of currencies)
+        const available = balance.available.reduce((acc, curr) => 
+            acc + (curr.amount / 100), 0);
+            
+        const pending = balance.pending.reduce((acc, curr) => 
+            acc + (curr.amount / 100), 0);
+
+        return res.status(200).json(
+            new ApiResponse(200, { available, pending }, "Balance retrieved successfully")
+        );
+    } catch (error) {
+        console.error(`[Stripe Balance Error] ${error.message}`);
+        return res.status(200).json(
+            new ApiResponse(200, { available: 0, pending: 0 }, "Failed to fetch Stripe balance")
+        );
+    }
+});
+
+export { registerUser, loginUser, logoutUser, refreshAccessToken, searchUsers, linkStripeAccount, verifyStripeStatus, getUserBalance };

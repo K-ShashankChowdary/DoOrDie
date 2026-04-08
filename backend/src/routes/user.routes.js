@@ -6,7 +6,8 @@ import {
     refreshAccessToken,
     searchUsers,
     linkStripeAccount,
-    verifyStripeStatus
+    verifyStripeStatus,
+    getUserBalance
 } from "../controllers/user.controller.js";
 import { verifyJWT } from "../middleware/auth.middleware.js";
 
@@ -29,5 +30,8 @@ router.route("/stripe-onboard").post(verifyJWT, linkStripeAccount);
 
 // Verify Stripe status
 router.route("/verify-stripe").get(verifyJWT, verifyStripeStatus);
+
+// Fetch Stripe Balance
+router.route("/balance").get(verifyJWT, getUserBalance);
 
 export default router;
