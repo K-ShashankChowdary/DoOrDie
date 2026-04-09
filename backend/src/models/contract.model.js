@@ -22,7 +22,7 @@ const contractSchema = new Schema(
         },
         status: {
             type: String,
-            enum: ["PENDING_PAYMENT", "ACTIVE", "VALIDATING", "COMPLETED", "FAILED", "REJECTED"],
+            enum: ["PENDING_PAYMENT", "ACTIVE", "VALIDATING", "COMPLETED", "FAILED", "REJECTED", "PAYOUT_FAILED"],
             default: "PENDING_PAYMENT"
         },
         creator: {
@@ -55,6 +55,10 @@ const contractSchema = new Schema(
             trim: true,
         },
         stripeTransferId: {
+            type: String,
+            trim: true,
+        },
+        payoutError: {
             type: String,
             trim: true,
         }

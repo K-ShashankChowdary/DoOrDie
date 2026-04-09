@@ -53,8 +53,8 @@ async function simulateTransactions() {
             const chargeId = capturedIntent.latest_charge;
             console.log(`- Funds Captured from Platform: ${chargeId}`);
 
-            // 3. Transfer 90% to the Validator (linked to the original charge)
-            const payoutAmount = STAKE_AMOUNT * 0.9;
+            // 3. Transfer 100% to the Validator (linked to the original charge)
+            const payoutAmount = STAKE_AMOUNT * 1.0;
             const transfer = await stripe.transfers.create({
                 amount: Math.round(payoutAmount * 100),
                 currency: 'usd',

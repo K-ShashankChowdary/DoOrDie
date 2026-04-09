@@ -352,7 +352,7 @@ const verifyProof = asyncHandler(async (req, res) => {
     contract = await Contract.findOneAndUpdate(
       { _id: contractId, status: "VALIDATING" },
       { $set: { status: isApproved ? "COMPLETED" : "REJECTED" } },
-      { new: true, session },
+      { returnDocument: 'after', session },
     ).populate("validator");
 
     if (!contract) {
@@ -375,24 +375,31 @@ const verifyProof = asyncHandler(async (req, res) => {
       // Failure: Capture hold and transfer to validator (Connect Transfer)
       if (contract.stripePaymentIntentId && contract.validator?.stripeAccountId) {
         
-        // Dynamic platform fee calculation
-        const platformFeePercentage = Number(process.env.PLATFORM_FEE_PERCENTAGE) || 10;
-        const totalStake = contract.stakeAmount;
-        const platformFee = totalStake * (platformFeePercentage / 100);
-        const payoutAmount = totalStake - platformFee;
+        // NO PLATFORM FEE: Full payout to validator
+        const payoutAmount = contract.stakeAmount;
 
-        // Capture hold and transfer in one atomic-like service call
-        const transfer = await stripeService.captureHoldAndTransfer(
-           contract.stripePaymentIntentId,
-           payoutAmount,
-           contract.validator.stripeAccountId,
-           `Stake payout from task resolution: ${contract._id}`
-        );
-        
-        contract.stripeTransferId = transfer.id;
-        await contract.save({ validateBeforeSave: false, session });
-        
-        console.log(`[Stripe] Payout CAPTURED and TRANSFERRED to validator. (Fee: ${platformFeePercentage}%)`);
+        try {
+          // Capture hold and transfer in one atomic-like service call
+          const transfer = await stripeService.captureHoldAndTransfer(
+             contract.stripePaymentIntentId,
+             payoutAmount,
+             contract.validator.stripeAccountId,
+             `Stake payout for task resolution: ${contract._id}`
+          );
+          
+          contract.stripeTransferId = transfer.id;
+          console.log(`[Stripe] Payout CAPTURED and TRANSFERRED 100% to validator.`);
+        } catch (stripeError) {
+          console.error(`[Stripe Payout Error] ${stripeError.message}`);
+          
+          // Special case: If funds were captured but transfer failed (e.g., insufficient platform balance)
+          // we must tag this contract so it's not lost.
+          contract.status = "PAYOUT_FAILED";
+          contract.payoutError = stripeError.message;
+          await contract.save({ validateBeforeSave: false, session });
+          
+          throw new ApiError(500, `Payout failed: ${stripeError.message}. Admin has been notified.`);
+        }
       } else {
         console.warn(`[Stripe] Payout failed. Missing PaymentIntent or Validator Stripe Account for ${contract._id}`);
       }

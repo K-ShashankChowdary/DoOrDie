@@ -53,6 +53,12 @@ const STATUS = {
     accent: "#ef4444",
     pulse: false,
   },
+  PAYOUT_FAILED: {
+    label: "Payout Failed",
+    chipCls: "status-chip danger",
+    accent: "#ef4444",
+    pulse: true,
+  },
 };
 
 /**
@@ -185,7 +191,7 @@ const TaskCard = ({ task, onRefetch }) => {
             </div>
             <div>
               <p className="task-meta-item__label">Stake</p>
-              <p className="task-meta-item__value">₹{stakeAmount}</p>
+              <p className="text-xl font-bold stat-value leading-none">₹{task.stakeAmount}</p>
             </div>
           </div>
 

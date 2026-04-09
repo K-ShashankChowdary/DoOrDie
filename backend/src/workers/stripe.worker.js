@@ -45,7 +45,7 @@ const stripeWorker = new Worker(
                 );
 
                 if (!contract) {
-                    console.log(`[Stripe Worker] Contract for PI ${piId} already active or not found. Skipping.`);
+                    console.log(`[Stripe Worker] PI ${piId} already handled (Status: ACTIVE). Skipping webhook redundancy.`);
                     return;
                 }
 
@@ -92,6 +92,17 @@ const stripeWorker = new Worker(
             case "transfer.paid":
                 console.log(`[Stripe Worker] SUCCESS: Funds TRANSFERRED to validator account: ${event.data.object.id}`);
                 break;
+
+            /**
+             * transfer.failed
+             * Fired when a transfer cannot be completed (insufficient platform funds or bank rejection).
+             */
+            case "transfer.failed": {
+                const transfer = event.data.object;
+                console.error(`[Stripe Worker] CRITICAL: Transfer ${transfer.id} FAILED. Reason: ${transfer.failure_code || "Unknown"}`);
+                // In a production app, we would send an email/Slack alert to the admin here.
+                break;
+            }
 
             /**
              * payment.created
