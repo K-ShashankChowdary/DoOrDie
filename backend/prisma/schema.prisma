@@ -1,0 +1,156 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------
+// 1. User & Identity
+// ---------------------------------------------------------
+
+// ============================================================================
+// 1. User & Identity
+// ============================================================================
+model User {
+  id                        String     @id @default(uuid())
+  fullName                  String
+  email                     String     @unique
+  password                  String
+  upiId                    String?
+  stripeAccountId          String?    @unique
+  stripeOnboardingComplete Boolean    @default(false)
+  refreshToken             String?
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+
+  // RELATIONSHIPS: Wallet is 1-to-1; Contracts are many-to-one
+  wallet            Wallet?
+  contractsCreated  Contract[] @relation("CreatedContracts")
+  contractsJudged   Contract[] @relation("JudgedContracts")
+  ledgerEntries     Ledger[]
+  withdrawals       Withdrawal[]
+
+  @@index([email])
+}
+
+// ============================================================================
+// 2. Financial Core (The Virtual Wallet Engine)
+// ============================================================================
+model Wallet {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  
+  // WHY: Decimal(12, 2) ensures precise currency handling (up to 10 billion INR)
+  availableBalance Decimal  @default(0) @db.Decimal(12, 2)
+  lockedBalance    Decimal  @default(0) @db.Decimal(12, 2)
+  
+  updatedAt        DateTime @updatedAt
+}
+
+model Ledger {
+  id              String     @id @default(uuid())
+  userId          String
+  user            User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  
+  amount          Decimal    @db.Decimal(12, 2)
+  balanceType     BalanceType
+  type            LedgerType
+  
+  referenceId     String?    // Link to ContractId, StripeSessionId, or WithdrawalId
+  description     String?
+  
+  createdAt       DateTime   @default(now())
+
+  @@index([userId])
+  @@index([referenceId])
+}
+
+enum BalanceType {
+  AVAILABLE
+  LOCKED
+}
+
+enum LedgerType {
+  TOPUP          // Stripe deposit
+  STAKE_LOCK     // Internal lock: Available -> Locked
+  STAKE_UNLOCK   // Refund: Locked -> Available
+  PENALTY_PAYOUT // Transfer: Creator Locked -> Validator Available
+  PLATFORM_FEE   // 10% Protocol Cut
+  WITHDRAWAL     // Egress: Transfer to external bank
+}
+
+// ============================================================================
+// 3. Task / Contract Engine
+// ============================================================================
+model Contract {
+  id                    String         @id @default(uuid())
+  title                 String
+  description           String?
+  deadline              DateTime
+  stakeAmount           Decimal        @db.Decimal(12, 2)
+  status                ContractStatus @default(PENDING_DEPOSIT)
+  
+  creatorId             String
+  creator               User           @relation("CreatedContracts", fields: [creatorId], references: [id], onDelete: Restrict)
+  
+  validatorId           String
+  validator             User           @relation("JudgedContracts", fields: [validatorId], references: [id], onDelete: Restrict)
+
+  // PROOF DATA: Creators can supply images, links, or text
+  proofImages           String[]       @default([])
+  proofLinks            String[]       @default([])
+  proofText             String?
+  
+  // METADATA: Tracks automated failures or payout errors
+  payoutError           String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@index([creatorId, status])
+  @@index([validatorId, status])
+}
+
+enum ContractStatus {
+  PENDING_DEPOSIT    // Draft: funds not yet committed
+  ACTIVE             // Committed: funds locked in creator's wallet
+  VALIDATING         // Review: proof submitted, awaiting judge
+  COMPLETED          // Approved: stake returned to available balance
+  REJECTED           // Failed: stake paid to validator (minus platform fee)
+  FAILED             // Timeout: auto-failed by background worker
+  PAYOUT_FAILED      // Error: logic failure during internal transfer
+}
+
+// ============================================================================
+// 4. Infrastructure & Resiliency
+// ============================================================================
+model Withdrawal {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  amount    Decimal          @db.Decimal(12, 2)
+  status    WithdrawalStatus @default(PENDING)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([userId])
+}
+
+enum WithdrawalStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model StripeEvent {
+  id        String   @id // WHY: event_id for idempotency guarding
+  type      String
+  processed Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
