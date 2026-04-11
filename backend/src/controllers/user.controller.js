@@ -1,265 +1,228 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { User } from "../models/user.model.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
-import { stripeService } from "../services/stripe.service.js";
+import prisma from "../db/prisma.js";
+import { walletService } from "../services/wallet.service.js";
 import jwt from "jsonwebtoken";
-
-// Helper function to generate both JWT tokens and save the refresh token to the database
-const generateAccessAndRefreshTokens = async (userId) => {
-    try {
-        const user = await User.findById(userId);
-        const accessToken = user.generateAccessToken();
-        const refreshToken = user.generateRefreshToken();
-
-        user.refreshToken = refreshToken;
-        await user.save({ validateBeforeSave: false });
-
-        return { accessToken, refreshToken };
-    } catch (error) {
-        throw new ApiError(500, "Something went wrong while generating tokens");
-    }
-};
+import bcrypt from "bcrypt";
 
 const cookieOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production"
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
 };
 
-// Register a new user in the system
+/**
+ * TOKEN GENERATOR
+ */
+const generateAccessAndRefreshTokens = async (userId) => {
+    try {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) throw new ApiError(404, "User not found to generate tokens");
+        
+        const accessToken = jwt.sign(
+            { id: user.id, email: user.email },
+            process.env.ACCESS_TOKEN_SECRET,
+            { expiresIn: process.env.ACCESS_TOKEN_EXPIRY || "1d" }
+        );
+        
+        const refreshToken = jwt.sign(
+            { id: user.id },
+            process.env.REFRESH_TOKEN_SECRET,
+            { expiresIn: process.env.REFRESH_TOKEN_EXPIRY || "10d" }
+        );
+
+        await prisma.user.update({
+            where: { id: userId },
+            data: { refreshToken }
+        });
+
+        return { accessToken, refreshToken };
+    } catch (error) {
+        console.error(`[Token Error] ${error.message}`);
+        throw new ApiError(error.statusCode || 500, error.message || "Token generation failed");
+    }
+};
+
 const registerUser = asyncHandler(async (req, res) => {
     const { fullName, email, password, upiId } = req.body;
 
-    if ([fullName, email, password].some((field) => !field || field.trim() === "")) {
-        throw new ApiError(400, "All fields are required");
+    if ([fullName, email, password].some(f => !f?.trim())) {
+        throw new ApiError(400, "Missing required fields");
     }
 
-    const existedUser = await User.findOne({ email });
-    if (existedUser) {
-        throw new ApiError(409, "User with email already exists");
-    }
+    const existedUser = await prisma.user.findUnique({ where: { email } });
+    if (existedUser) throw new ApiError(409, "User already exists");
 
-    const user = await User.create({ fullName, email, password, upiId: upiId || "" });
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    const user = await prisma.user.create({
+        data: {
+            fullName,
+            email,
+            password: hashedPassword,
+            upiId: upiId || "",
+            stripeOnboardingComplete: true,
+            stripeAccountId: null,
+            wallet: { create: {} }
+        },
+        include: { wallet: true }
+    });
 
-    const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(user._id);
-    const createdUser = await User.findById(user._id).select("-password -refreshToken");
+    const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(user.id);
+
+    const createdUser = { ...user };
+    delete createdUser.password;
+    delete createdUser.refreshToken;
 
     return res
         .status(201)
         .cookie("accessToken", accessToken, cookieOptions)
         .cookie("refreshToken", refreshToken, cookieOptions)
-        .json(
-            new ApiResponse(201, { user: createdUser, accessToken, refreshToken }, "User registered and logged in successfully")
-        );
+        .json(new ApiResponse(201, { user: createdUser, accessToken, refreshToken }, "Registered successfully"));
 });
 
-// Log in an existing user
 const loginUser = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-        throw new ApiError(400, "Email and password are required");
-    }
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) throw new ApiError(404, "User not found");
 
-    const user = await User.findOne({ email });
-    if (!user) {
-        throw new ApiError(404, "User does not exist");
-    }
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) throw new ApiError(401, "Invalid credentials");
 
-    const isPasswordValid = await user.isPasswordCorrect(password);
-    if (!isPasswordValid) {
-        throw new ApiError(401, "Invalid user credentials");
-    }
+    const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(user.id);
 
-    const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(user._id);
-    const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
+    const loggedInUser = { ...user };
+    delete loggedInUser.password;
+    delete loggedInUser.refreshToken;
 
     return res
         .status(200)
         .cookie("accessToken", accessToken, cookieOptions)
         .cookie("refreshToken", refreshToken, cookieOptions)
-        .json(
-            new ApiResponse(200, { user: loggedInUser, accessToken, refreshToken }, "User logged in successfully")
-        );
+        .json(new ApiResponse(200, { user: loggedInUser, accessToken, refreshToken }, "Logged in successfully"));
 });
 
-// Log out the user securely
 const logoutUser = asyncHandler(async (req, res) => {
-    await User.findByIdAndUpdate(
-        req.user._id,
-        { $unset: { refreshToken: 1 } },
-        { new: true }
-    );
+    await prisma.user.update({
+        where: { id: req.user.id },
+        data: { refreshToken: null }
+    });
 
     return res
         .status(200)
         .clearCookie("accessToken", cookieOptions)
         .clearCookie("refreshToken", cookieOptions)
-        .json(new ApiResponse(200, {}, "User logged out successfully"));
+        .json(new ApiResponse(200, {}, "Logged out successfully"));
 });
 
-// Generate a new access token
-const refreshAccessToken = asyncHandler(async (req, res) => {
-    const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken;
+const getCurrentUser = asyncHandler(async (req, res) => {
+    return res.status(200).json(new ApiResponse(200, { user: req.user }, "User fetched"));
+});
 
+const getUserBalance = asyncHandler(async (req, res) => {
+    const wallet = await prisma.wallet.findUnique({
+        where: { userId: req.user.id }
+    });
+    return res.status(200).json(new ApiResponse(200, { 
+        available: Number(wallet?.availableBalance || 0),
+        pending: Number(wallet?.lockedBalance || 0)
+    }, "Wallet balance fetched"));
+});
+
+/** Demo: add funds instantly (no external payment). */
+const createTopupSession = asyncHandler(async (req, res) => {
+    const { amount } = req.body;
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount < 50) {
+        throw new ApiError(400, "Top-up amount must be at least ₹50.");
+    }
+    await walletService.demoCreditWallet(req.user.id, numericAmount);
+    return res.status(200).json(new ApiResponse(200, { demo: true }, "Funds added (demo wallet)."));
+});
+
+/** Demo: withdraw instantly (simulated bank transfer). */
+const requestWithdrawal = asyncHandler(async (req, res) => {
+    const { amount } = req.body;
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount < 100) {
+        throw new ApiError(400, "Withdrawal amount must be at least ₹100.");
+    }
+    const withdrawal = await walletService.demoWithdraw(req.user.id, numericAmount);
+    return res.status(200).json(new ApiResponse(200, { withdrawalId: withdrawal.id, demo: true }, "Withdrawal completed (demo)."));
+});
+
+const getWithdrawalHistory = asyncHandler(async (req, res) => {
+    const withdrawals = await prisma.withdrawal.findMany({
+        where: { userId: req.user.id },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+    });
+    return res.status(200).json(new ApiResponse(200, { withdrawals }, "Withdrawal history fetched"));
+});
+
+const refreshAccessToken = asyncHandler(async (req, res) => {
+    const incomingRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
     if (!incomingRefreshToken) {
-        throw new ApiError(401, "Unauthorized request");
+        throw new ApiError(401, "No refresh token provided");
     }
 
     try {
         const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
-        const user = await User.findById(decodedToken?._id).select("-password");
+        const userId = decodedToken?.id || decodedToken?._id;
+        
+        if (!userId) {
+            console.error("[Token Refresh] No ID found in token payload:", decodedToken);
+            throw new ApiError(401, "Invalid token payload");
+        }
 
-        if (!user) {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+
+        if (!user || user.refreshToken !== incomingRefreshToken) {
             throw new ApiError(401, "Invalid refresh token");
         }
 
-        if (incomingRefreshToken !== user.refreshToken) {
-            throw new ApiError(401, "Refresh token is expired or used");
-        }
+        const { accessToken, refreshToken: newRefreshToken } = await generateAccessAndRefreshTokens(user.id);
 
-        const { accessToken, refreshToken: newRefreshToken } = await generateAccessAndRefreshTokens(user._id);
-
-        const safeUser = user.toObject();
-        delete safeUser.refreshToken;
-        delete safeUser.password;
+        const loggedInUser = { ...user };
+        delete loggedInUser.password;
+        delete loggedInUser.refreshToken;
 
         return res
             .status(200)
             .cookie("accessToken", accessToken, cookieOptions)
             .cookie("refreshToken", newRefreshToken, cookieOptions)
-            .json(
-                new ApiResponse(200, { user: safeUser, accessToken, refreshToken: newRefreshToken }, "Access token refreshed")
-            );
+            .json(new ApiResponse(200, { user: loggedInUser, accessToken, refreshToken: newRefreshToken }, "Token refreshed"));
     } catch (error) {
-        throw new ApiError(401, error?.message || "Invalid refresh token");
+        throw new ApiError(401, "Invalid refresh token");
     }
 });
 
-// Search for other users
 const searchUsers = asyncHandler(async (req, res) => {
     const { query } = req.query;
-    
-    if (!query || query.trim() === "") {
-        return res.status(200).json(new ApiResponse(200, [], "Empty query"));
-    }
-
-    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    const users = await User.find({
-        _id: { $ne: req.user._id },
-        $or: [
-            { fullName: { $regex: escapedQuery, $options: "i" } },
-            { email: { $regex: escapedQuery, $options: "i" } },
-            { upiId: { $regex: escapedQuery, $options: "i" } }
-        ]
-    }).select("_id fullName email");
-
-    return res.status(200).json(new ApiResponse(200, users, "Users retrieved successfully"));
+    const users = await prisma.user.findMany({
+        where: {
+            id: { not: req.user.id },
+            OR: [
+                { fullName: { contains: query, mode: 'insensitive' } },
+                { email: { contains: query, mode: 'insensitive' } }
+            ]
+        },
+        select: { id: true, fullName: true, email: true }
+    });
+    return res.status(200).json(new ApiResponse(200, users, "Users found"));
 });
 
-/**
- * Creates a Stripe Express account for the user and returns an onboarding link.
- * This replaces the previous Razorpay Route linking logic.
- */
-const linkStripeAccount = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user._id);
-    if (!user) {
-        throw new ApiError(404, "User not found");
-    }
-
-    // Reuse existing account if it exists
-    let accountId = user.stripeAccountId;
-
-    if (!accountId) {
-        const account = await stripeService.createExpressAccount(user.email, {
-            userId: user._id.toString()
-        });
-        accountId = account.id;
-        user.stripeAccountId = accountId;
-        await user.save({ validateBeforeSave: false });
-    }
-
-    // Generate onboarding link
-    // We redirect to the frontend dashboard with status flags
-    const baseUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
-    const refreshUrl = `${baseUrl}/dashboard?stripe_onboarding=refresh`;
-    const returnUrl = `${baseUrl}/dashboard?stripe_onboarding=success`;
-
-    const accountLink = await stripeService.createAccountOnboardingLink(
-        accountId,
-        refreshUrl,
-        returnUrl
-    );
-
-    return res.status(200).json(
-        new ApiResponse(200, { onboardingUrl: accountLink.url }, "Stripe onboarding link generated")
-    );
-});
-
-/**
- * Checks Stripe account details and updates the user's stripeOnboardingComplete status.
- * This is called when the user returns from the Stripe onboarding flow.
- */
-const verifyStripeStatus = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user._id);
-    if (!user || !user.stripeAccountId) {
-        throw new ApiError(400, "User does not have a Stripe account to verify.");
-    }
-
-    const account = await stripeService.getAccount(user.stripeAccountId);
-
-    if (account.details_submitted) {
-        user.stripeOnboardingComplete = true;
-        await user.save({ validateBeforeSave: false });
-    }
-
-    return res.status(200).json(
-        new ApiResponse(
-            200, 
-            { 
-                stripeOnboardingComplete: user.stripeOnboardingComplete,
-                detailsSubmitted: account.details_submitted,
-                payoutsEnabled: account.payouts_enabled
-            }, 
-            user.stripeOnboardingComplete 
-                ? "Stripe onboarding successfully verified." 
-                : "Stripe onboarding not yet complete. Please ensure all details are submitted."
-        )
-    );
-});
-
-/**
- * Fetches the current balance from the user's linked Stripe account.
- */
-const getUserBalance = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user._id);
-    
-    if (!user || !user.stripeAccountId) {
-        return res.status(200).json(
-            new ApiResponse(200, { available: 0, pending: 0 }, "No Stripe account linked")
-        );
-    }
-
-    try {
-        const balance = await stripeService.getAccountBalance(user.stripeAccountId);
-        
-        // Sum up the amounts (Stripe balance comes in an array of currencies)
-        const available = balance.available.reduce((acc, curr) => 
-            acc + (curr.amount / 100), 0);
-            
-        const pending = balance.pending.reduce((acc, curr) => 
-            acc + (curr.amount / 100), 0);
-
-        return res.status(200).json(
-            new ApiResponse(200, { available, pending }, "Balance retrieved successfully")
-        );
-    } catch (error) {
-        console.error(`[Stripe Balance Error] ${error.message}`);
-        return res.status(200).json(
-            new ApiResponse(200, { available: 0, pending: 0 }, "Failed to fetch Stripe balance")
-        );
-    }
-});
-
-export { registerUser, loginUser, logoutUser, refreshAccessToken, searchUsers, linkStripeAccount, verifyStripeStatus, getUserBalance };
+export { 
+    registerUser, 
+    loginUser, 
+    logoutUser, 
+    getCurrentUser,
+    getUserBalance, 
+    createTopupSession,
+    requestWithdrawal,
+    getWithdrawalHistory,
+    refreshAccessToken, 
+    searchUsers 
+};

@@ -9,6 +9,7 @@ api.interceptors.response.use(
     (response) => response,
     async (error) => {
         const originalRequest = error.config;
+        if (!originalRequest) return Promise.reject(error);
 
         // Skip retry logic if the auth endpoints themselves fail
         if (

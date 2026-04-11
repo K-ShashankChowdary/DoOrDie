@@ -47,6 +47,12 @@
   --shadow-lg: 0 18px 50px rgba(15, 23, 42, 0.14);
   --shadow-brand: 0 14px 40px rgba(37, 99, 235, 0.25);
 
+  /* Paytm Brand Palette */
+  --paytm-blue: #00b9f1;
+  --paytm-dark-blue: #002e6e;
+  --paytm-light-blue: #e6f7fe;
+  --paytm-gray: #f5f7f9;
+  
   /* Spacing scale (4px base) */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -1173,6 +1179,82 @@ p {
   margin-top: 0.12rem;
 }
 
+/* Deadline / grace timeline strip */
+.task-card-new__timeline {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.95), rgba(255, 255, 255, 0.88));
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
+}
+
+.task-card-new__timeline--calm {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.9), rgba(255, 255, 255, 0.92));
+}
+
+.task-card-new__timeline--warn {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.95), rgba(255, 255, 255, 0.9));
+}
+
+.task-card-new__timeline--danger {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.95), rgba(255, 255, 255, 0.9));
+}
+
+.task-card-new__timeline--grace {
+  border-color: rgba(16, 185, 129, 0.28);
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.95), rgba(255, 255, 255, 0.92));
+}
+
+.task-card-new__timeline-icon {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+}
+
+.task-card-new__timeline--warn .task-card-new__timeline-icon {
+  background: rgba(245, 158, 11, 0.15);
+  color: #d97706;
+}
+
+.task-card-new__timeline--danger .task-card-new__timeline-icon {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.task-card-new__timeline--grace .task-card-new__timeline-icon {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+
+.task-card-new__timeline-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+}
+
+.task-card-new__timeline-sub {
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #64748b;
+  line-height: 1.45;
+}
+
 /* Pay section */
 .task-card-new__pay {
   display: flex;
@@ -1447,4 +1529,451 @@ p {
 /* Utility for iOS bottom-safe navigation bars */
 .pb-safe-area {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+/* ─── New Dashboard Stat Cards ────────────────────────────── */
+.dash-stat-card {
+  background: #ffffff;
+  border: 1px solid #e8edf3;
+  border-radius: 20px;
+  padding: 1.25rem 1.25rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.dash-stat-card:hover {
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.1);
+  transform: translateY(-2px);
+}
+
+.dash-stat-card__icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-bottom: 0.2rem;
+}
+
+.dash-stat-card__count {
+  font-size: 2.25rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+  line-height: 1;
+}
+
+.dash-stat-card__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #94a3b8;
+}
+
+/* ─── Wallet Card ─────────────────────────────────────────── */
+.dash-wallet-card {
+  background: #ffffff;
+  border: 1.5px solid rgba(0, 185, 241, 0.25);
+  border-radius: 20px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 4px 20px rgba(0, 185, 241, 0.08), 0 2px 8px rgba(15, 23, 42, 0.04);
+  position: relative;
+  overflow-x: clip;
+  overflow-y: visible;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.dash-wallet-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #00B9F1, #0284c7);
+  border-radius: 20px 20px 0 0;
+}
+
+.dash-wallet-card:hover {
+  box-shadow: 0 8px 28px rgba(0, 185, 241, 0.14), 0 4px 12px rgba(15, 23, 42, 0.06);
+  transform: translateY(-2px);
+}
+
+.dash-wallet-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.4rem;
+}
+
+.dash-wallet-card__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #00B9F1;
+  margin-bottom: 0.3rem;
+}
+
+.dash-wallet-card__amount {
+  font-size: 1.75rem;
+  font-weight: 900;
+  color: #002e6e;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.dash-wallet-card__eye {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.dash-wallet-card__eye:hover {
+  color: #00B9F1;
+  border-color: rgba(0, 185, 241, 0.35);
+  background: rgba(0, 185, 241, 0.05);
+}
+
+.dash-wallet-card__pending {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #b45309;
+}
+
+.dash-wallet-card__pending-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  animation: pulse-ring 2s ease-out infinite;
+  flex-shrink: 0;
+}
+
+.dash-wallet-card__refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  font-family: "Outfit", sans-serif;
+  color: #fff;
+  background: #00B9F1;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  box-shadow: 0 4px 12px rgba(0, 185, 241, 0.3);
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.dash-wallet-card__refresh:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.dash-wallet-card__refresh:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.dash-wallet-card__refresh:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Wallet top-up / withdraw — full-width, high-contrast (must not rely on browser defaults) */
+.wallet-actions {
+  width: 100%;
+}
+
+.wallet-action-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.wallet-action-label {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #334155;
+}
+
+.wallet-action-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.wallet-action-btn {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.15rem;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  font-family: "Outfit", sans-serif;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  color: #fff;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.wallet-action-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.wallet-action-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.wallet-action-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.wallet-action-btn--primary {
+  background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.28);
+}
+
+.wallet-action-btn--primary.wallet-action-btn--muted {
+  background: linear-gradient(135deg, #475569 0%, #334155 100%);
+  box-shadow: 0 3px 12px rgba(15, 23, 42, 0.18);
+}
+
+/* ─── Dashboard layout (tasks + sticky wallet) ───────────── */
+.dashboard-layout {
+  display: grid;
+  gap: 1.75rem;
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .dashboard-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  }
+
+  .dashboard-layout__wallet {
+    position: sticky;
+    top: 5rem;
+  }
+}
+
+.dashboard-layout__main {
+  min-width: 0;
+}
+
+.dashboard-layout__tasks {
+  min-height: 12rem;
+}
+
+.dash-wallet-card__sub {
+  line-height: 1.35;
+}
+
+/* ─── Empty State ─────────────────────────────────────────── */
+.empty-state-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  border-radius: 24px;
+  border: 1.5px dashed #e2e8f0;
+  background: rgba(248, 250, 252, 0.5);
+  text-align: center;
+}
+
+/* ─── Modern UI Refresh Layer ─────────────────────────────── */
+
+:root {
+  --surface-glass: rgba(255, 255, 255, 0.78);
+  --surface-glass-strong: rgba(255, 255, 255, 0.9);
+  --ink-soft: #64748b;
+}
+
+.page-shell {
+  position: relative;
+}
+
+.page-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(59, 130, 246, 0.14), transparent 30%),
+    radial-gradient(circle at 90% 8%, rgba(124, 58, 237, 0.13), transparent 28%),
+    radial-gradient(circle at 50% 100%, rgba(16, 185, 129, 0.08), transparent 40%);
+  z-index: -1;
+}
+
+.dashboard-container {
+  width: min(1240px, 100%);
+}
+
+.dash-stat-card,
+.dash-wallet-card,
+.task-card-new,
+.empty-state-card {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.dash-stat-card {
+  border-radius: 22px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  background: var(--surface-glass-strong);
+  box-shadow:
+    0 18px 38px -24px rgba(15, 23, 42, 0.45),
+    0 2px 12px rgba(15, 23, 42, 0.06);
+  min-height: 130px;
+  justify-content: center;
+}
+
+.dash-stat-card__count {
+  font-size: clamp(1.8rem, 2.8vw, 2.4rem);
+}
+
+.dash-stat-card__label {
+  color: var(--ink-soft);
+  letter-spacing: 0.08em;
+}
+
+.dash-wallet-card {
+  border-radius: 22px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 255, 0.85)),
+    var(--surface-glass-strong);
+  box-shadow:
+    0 20px 44px -24px rgba(37, 99, 235, 0.45),
+    0 2px 16px rgba(15, 23, 42, 0.08);
+  min-height: 130px;
+}
+
+.dash-wallet-card__amount {
+  font-size: clamp(1.45rem, 2.4vw, 1.95rem);
+}
+
+.dash-wallet-card input {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  transition: all 0.2s ease;
+}
+
+.dash-wallet-card input:focus {
+  border-color: rgba(37, 99, 235, 0.5);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+  outline: none;
+}
+
+.tasks-grid {
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 1.1rem;
+  align-items: start;
+}
+
+.task-card-new {
+  border-radius: 20px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(248, 250, 255, 0.9));
+  box-shadow:
+    0 18px 38px -26px rgba(15, 23, 42, 0.42),
+    0 4px 14px rgba(15, 23, 42, 0.06);
+}
+
+.task-card-new:hover {
+  transform: translateY(-5px);
+  box-shadow:
+    0 24px 50px -30px rgba(37, 99, 235, 0.45),
+    0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.task-card-new__bar {
+  height: 5px;
+}
+
+.task-card-new__title {
+  font-size: 1.08rem;
+}
+
+.task-card-new__desc {
+  color: #7c8ca1;
+}
+
+.task-meta-item {
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.task-card-new__pay-btn {
+  border-radius: 14px;
+  box-shadow: 0 14px 26px -16px rgba(37, 99, 235, 0.6);
+}
+
+.status-chip {
+  border-radius: 999px;
+  font-size: 0.74rem;
+  padding: 0.35rem 0.7rem;
+}
+
+.empty-state-card {
+  border-radius: 26px;
+  border: 1px dashed rgba(99, 102, 241, 0.34);
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(238, 242, 255, 0.88));
+  box-shadow: 0 26px 50px -34px rgba(79, 70, 229, 0.45);
+}
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    padding-top: 0.5rem;
+  }
+
+  .tasks-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-wallet-card {
+    min-height: auto;
+  }
+
+  .dash-stat-card {
+    min-height: 112px;
+  }
 }

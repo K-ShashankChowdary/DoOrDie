@@ -1,484 +1,231 @@
-import mongoose from "mongoose";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
-import { Contract } from "../models/contract.model.js";
-import { User } from "../models/user.model.js";
+import prisma from "../db/prisma.js";
+import { walletService } from "../services/wallet.service.js";
 import { queueService } from "../services/queue.service.js";
-import { getUploadSignature as generateCloudinarySignature } from "../utils/cloudinary.js";
-import { stripeService } from "../services/stripe.service.js";
+import logger from "../utils/logger.js";
+import { Prisma } from "@prisma/client";
+import { v2 as cloudinary } from "cloudinary";
 
-// Razorpay initialization removed — purely Stripe-based financial architecture.
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-// ============================================================================
-// 2. Create the Contract (Initial Draft)
-// ============================================================================
+/**
+ * 1. CREATE CONTRACT (DRAFT)
+ * Why: Creates a task in PENDING_DEPOSIT state. Funds are not yet locked.
+ */
 const createContract = asyncHandler(async (req, res) => {
-  const { title, description, stakeAmount, deadline, validator } = req.body;
+    const { title, description, deadline, stakeAmount, validatorId } = req.body;
 
-  if (!title || !stakeAmount || !deadline || !validator) {
-    throw new ApiError(
-      400,
-      "Title, Stake Amount, Deadline, and Validator are required",
-    );
-  }
-
-  // Ensure the user isn't betting less than the platform minimum of ₹50
-  if (stakeAmount < 50) {
-    throw new ApiError(400, "Minimum stake amount is ₹50");
-  }
-
-  const parsedDeadline = new Date(deadline);
-  if (isNaN(parsedDeadline.getTime())) {
-    throw new ApiError(400, "Invalid date format for deadline");
-  }
-  if (parsedDeadline < new Date()) {
-    throw new ApiError(400, "Deadline must be in the future");
-  }
-
-  // Validate that the validator exists and is not the creator
-  const isValidatorExist = await User.findById(validator);
-  if (!isValidatorExist) {
-    throw new ApiError(404, "Selected Validator does not exist");
-  }
-
-  // Prevent users from picking themselves as the judge, which would allow them to cheat
-  if (req.user._id.toString() === validator.toString()) {
-    throw new ApiError(400, "You cannot be your own validator");
-  }
-
-  // Enforce Stripe validator account linking and detail submission
-  if (!isValidatorExist.stripeOnboardingComplete) {
-    throw new ApiError(
-      400,
-      "The selected Validator has not completed their Stripe onboarding to receive payouts."
-    );
-  }
-
-  // Create the contract but keep it PENDING until they actually pay
-  const contract = await Contract.create({
-    title,
-    description,
-    stakeAmount,
-    deadline,
-    validator,
-    creator: req.user._id,
-    status: "PENDING_PAYMENT",
-  });
-
-  return res
-    .status(201)
-    .json(
-      new ApiResponse(
-        201,
-        { contract },
-        "Contract drafted. Ready for payment.",
-      ),
-    );
-});
-
-// ============================================================================
-// 3. Generate Stripe PaymentIntent (Auth-and-Hold)
-// ============================================================================
-const generatePaymentOrder = asyncHandler(async (req, res) => {
-  const { contractId } = req.params;
-
-  const contract = await Contract.findById(contractId);
-
-  if (!contract) {
-    throw new ApiError(404, "Contract not found");
-  }
-
-  // Security Check: Only the creator can pay for their own contract
-  if (contract.creator.toString() !== req.user._id.toString()) {
-    throw new ApiError(403, "You can only pay for your own contracts");
-  }
-
-  if (contract.status !== "PENDING_PAYMENT") {
-    throw new ApiError(400, "This contract is already active or completed");
-  }
-
-  if (contract.deadline < new Date()) {
-    throw new ApiError(
-      400,
-      "The deadline for this contract has already passed. Payment cannot be initiated.",
-    );
-  }
-
-  // Create a PaymentIntent with capture_method: 'manual' (Auth-and-Hold)
-  const paymentIntent = await stripeService.createAuthHold(
-    contract.stakeAmount,
-    {
-      contractId: contract._id.toString(),
-      creatorId: req.user._id.toString(),
-      type: 'task_stake_hold'
-    }
-  );
-
-  if (!paymentIntent) {
-    throw new ApiError(500, "Failed to create Stripe PaymentIntent");
-  }
-
-  // Save the PaymentIntent ID so we can capture or cancel it later
-  contract.stripePaymentIntentId = paymentIntent.id;
-  await contract.save({ validateBeforeSave: false });
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        { 
-          clientSecret: paymentIntent.client_secret, 
-          contractId: contract._id 
-        },
-        "Stripe PaymentIntent generated (Hold mode)",
-      ),
-    );
-});
-
-// ============================================================================
-// 4. Verify Stripe Payment (Hold Confirmation)
-// ============================================================================
-const verifyPayment = asyncHandler(async (req, res) => {
-  const { stripePaymentIntentId } = req.params;
-
-  if (!stripePaymentIntentId) {
-    throw new ApiError(400, "Missing Stripe PaymentIntent ID");
-  }
-
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const contract = await Contract.findOne({
-      stripePaymentIntentId
-    }).session(session);
-
-    if (!contract) {
-      throw new ApiError(404, "Contract associated with this PaymentIntent not found");
+    if (!title || !deadline || !stakeAmount || !validatorId) {
+        throw new ApiError(400, "Missing required fields for contract creation.");
     }
 
-    if (contract.status === "ACTIVE") {
-      await session.abortTransaction();
-      return res
-        .status(200)
-        .json(
-          new ApiResponse(
-            200,
-            { contractId: contract._id, status: contract.status },
-            "Payment already verified and task is active.",
-          ),
-        );
-    }
-
-    // Update the contract document
-    contract.status = "ACTIVE";
-    await contract.save({ validateBeforeSave: false, session });
-    await session.commitTransaction();
-
-    // 2. Add the BullMQ delayed job to auto-capture (fail) if deadline lapses
-    // This is a safety measure in case the validator never verifies the proof.
-    const delay = Math.max(0, new Date(contract.deadline).getTime() - Date.now());
-    
-    // We use a Promise.race with a timeout to prevent Redis connection issues from hanging the response.
-    try {
-      await Promise.race([
-        queueService.scheduleTaskDeadline(contract._id, delay),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Queue Timeout")), 5000))
-      ]);
-      console.log(`[Queue] Hold confirmed & deadline scheduled for contract ${contract._id} (Delay: ${delay}ms)`);
-    } catch (queueError) {
-      // We log the error but don't fail the request since the transaction is already committed.
-      // The task is active, but we should alert for manual settlement if the queue is down.
-      console.error(`[Queue] CRITICAL: Failed to schedule deadline for ${contract._id}:`, queueError.message);
-    }
-
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(
-          200,
-          { contractId: contract._id, status: contract.status },
-          "Hold confirmed! Task is now ACTIVE with funds authorized via Stripe.",
-        ),
-      );
-  } catch (error) {
-    await session.abortTransaction();
-    throw new ApiError(
-      error.statusCode || 500,
-      error.message || "Stripe hold verification failed.",
-    );
-  } finally {
-    session.endSession();
-  }
-});
-
-// Get all contracts for the user (as creator or validator)
-const getUserContracts = asyncHandler(async (req, res) => {
-  const contracts = await Contract.find({
-    $or: [{ creator: req.user._id }, { validator: req.user._id }],
-  })
-    .populate("creator", "fullName email")
-    .populate("validator", "fullName email")
-    .sort({ createdAt: -1 });
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, { contracts }, "Contracts retrieved successfully"),
-    );
-});
-
-// Get details for a specific contract by ID
-const getContractById = asyncHandler(async (req, res) => {
-  const { contractId } = req.params;
-  const contract = await Contract.findById(contractId)
-    .populate("creator", "fullName email")
-    .populate("validator", "fullName email");
-
-  if (!contract) {
-    throw new ApiError(404, "Contract not found");
-  }
-
-  // Security check: Only creator or validator can view this
-  if (
-    contract.creator._id.toString() !== req.user._id.toString() &&
-    contract.validator._id.toString() !== req.user._id.toString()
-  ) {
-    throw new ApiError(403, "Not authorized to view this contract");
-  }
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, { contract }, "Contract details found"));
-});
-
-// Upload proof and change status to VALIDATING.
-// Proof is flexible: the creator can supply any combination of:
-//   - proofImages: string[] — Cloudinary URLs uploaded client-side
-//   - proofLinks:  string[] — external links (GitHub, Notion, etc.)
-//   - proofText:   string  — free-form textual explanation
-// At least one field must be non-empty.
-const uploadProof = asyncHandler(async (req, res) => {
-  const { contractId } = req.params;
-  const { proofImages = [], proofLinks = [], proofText = "" } = req.body;
-
-  // Validate: at least one proof field must carry real content
-  const hasImages = Array.isArray(proofImages) && proofImages.length > 0;
-  const hasLinks = Array.isArray(proofLinks) && proofLinks.length > 0;
-  const hasText = typeof proofText === "string" && proofText.trim().length > 0;
-
-  if (!hasImages && !hasLinks && !hasText) {
-    throw new ApiError(
-      400,
-      "At least one proof item (image, link, or text) is required",
-    );
-  }
-
-  const contract = await Contract.findById(contractId);
-  if (!contract) {
-    throw new ApiError(404, "Contract not found");
-  }
-
-  // Only the creator may submit proof
-  if (contract.creator.toString() !== req.user._id.toString()) {
-    throw new ApiError(403, "Only the creator can upload proof");
-  }
-
-  // Contract must be ACTIVE to accept proof
-  if (contract.status !== "ACTIVE") {
-    throw new ApiError(
-      400,
-      `Cannot upload proof. Contract status is ${contract.status}`,
-    );
-  }
-
-  // Persist proof fields and transition status.
-  // Transitioning to VALIDATING pauses the deadline worker (it skips VALIDATING contracts).
-  if (hasImages) contract.proofImages = proofImages;
-  if (hasLinks) contract.proofLinks = proofLinks;
-  if (hasText) contract.proofText = proofText.trim();
-  contract.status = "VALIDATING";
-  await contract.save({ validateBeforeSave: false });
-
-  // Arm the grace-period worker: auto-refund creator if validator ghosts for 48 hrs after deadline
-  const gracePeriodDelay = Math.max(
-    0,
-    new Date(contract.deadline).getTime() + 48 * 60 * 60 * 1000 - Date.now(),
-  );
-
-  // Note: We'll keep the grace period queue name for compatibility with existing workers
-  // but use the centralized service for scheduling if possible.
-  // For now, focusing on the core financial flow.
-  await queueService.scheduleTaskDeadline(contract._id, gracePeriodDelay); // Re-using deadline queue for ghosting
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, { contract }, "Proof uploaded. Pending validation."),
-    );
-});
-
-// Verify proof image (approve or reject) and update status
-const verifyProof = asyncHandler(async (req, res) => {
-  const { contractId } = req.params;
-  const { isApproved } = req.body;
-
-  if (typeof isApproved !== "boolean") {
-    throw new ApiError(400, "isApproved boolean is required");
-  }
-
-  // Pre-fetch the contract to check validator ID before taking the lock
-  let contract = await Contract.findById(contractId);
-  if (!contract) {
-    throw new ApiError(404, "Contract not found");
-  }
-
-  // Only the assigned third-party judge can evaluate the proof
-  if (contract.validator.toString() !== req.user._id.toString()) {
-    throw new ApiError(
-      403,
-      "Only the assigned validator can verify this proof",
-    );
-  }
-
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    // Use atomic findOneAndUpdate to instantly lock the document and transition the state.
-    // This prevents double-spend race conditions if the validator double-clicks the "Reject" button.
-    contract = await Contract.findOneAndUpdate(
-      { _id: contractId, status: "VALIDATING" },
-      { $set: { status: isApproved ? "COMPLETED" : "REJECTED" } },
-      { returnDocument: 'after', session },
-    ).populate("validator");
-
-    if (!contract) {
-      throw new ApiError(
-        400,
-        "Cannot verify proof. Contract is not in VALIDATING state or already verified.",
-      );
-    }
-
-    // The state is successfully locked in DB. Proceed with irreversible Stripe API calls.
-    if (isApproved) {
-      // Success: Release (Cancel) the hold, returning money to creator
-      if (contract.stripePaymentIntentId) {
-        await stripeService.cancelHold(contract.stripePaymentIntentId);
-        console.log(`[Stripe] Authorized hold CANCELED (released) for contract ${contract._id}`);
-      } else {
-        console.error(`[Stripe] CRITICAL: Contract ${contract._id} approved but missing PaymentIntent ID.`);
-      }
-    } else {
-      // Failure: Capture hold and transfer to validator (Connect Transfer)
-      if (contract.stripePaymentIntentId && contract.validator?.stripeAccountId) {
-        
-        // NO PLATFORM FEE: Full payout to validator
-        const payoutAmount = contract.stakeAmount;
-
-        try {
-          // Capture hold and transfer in one atomic-like service call
-          const transfer = await stripeService.captureHoldAndTransfer(
-             contract.stripePaymentIntentId,
-             payoutAmount,
-             contract.validator.stripeAccountId,
-             `Stake payout for task resolution: ${contract._id}`
-          );
-          
-          contract.stripeTransferId = transfer.id;
-          console.log(`[Stripe] Payout CAPTURED and TRANSFERRED 100% to validator.`);
-        } catch (stripeError) {
-          console.error(`[Stripe Payout Error] ${stripeError.message}`);
-          
-          // Special case: If funds were captured but transfer failed (e.g., insufficient platform balance)
-          // we must tag this contract so it's not lost.
-          contract.status = "PAYOUT_FAILED";
-          contract.payoutError = stripeError.message;
-          await contract.save({ validateBeforeSave: false, session });
-          
-          throw new ApiError(500, `Payout failed: ${stripeError.message}. Admin has been notified.`);
+    const contract = await prisma.contract.create({
+        data: {
+            title,
+            description,
+            deadline: new Date(deadline),
+            stakeAmount: new Prisma.Decimal(stakeAmount),
+            creatorId: req.user.id,
+            validatorId,
+            status: "PENDING_DEPOSIT"
         }
-      } else {
-        console.warn(`[Stripe] Payout failed. Missing PaymentIntent or Validator Stripe Account for ${contract._id}`);
-      }
+    });
+
+    console.log(`\n📋 [CONTRACT CREATED] ─────────────────────────────`);
+    console.log(`   ID       : ${contract.id}`);
+    console.log(`   Title    : "${title}"`);
+    console.log(`   Stake    : ₹${stakeAmount}`);
+    console.log(`   Creator  : ${req.user.id}`);
+    console.log(`   Validator: ${validatorId}`);
+    console.log(`   Deadline : ${new Date(deadline).toLocaleString('en-IN')}`);
+    console.log(`   Status   : PENDING_DEPOSIT (awaiting stake)`);
+    console.log(`─────────────────────────────────────────────────────\n`);
+
+    return res.status(201).json(new ApiResponse(201, { contract }, "Task draft created. Activate it from your dashboard when you’re ready (wallet stake)."));
+});
+
+/**
+ * 2. ACTIVATE CONTRACT WITH WALLET STAKE
+ * Why: Locks stake in wallet and activates task without Stripe task payment flow.
+ */
+const generatePaymentOrder = asyncHandler(async (req, res) => {
+    const { contractId } = req.params;
+
+    const contract = await prisma.contract.findUnique({
+        where: { id: contractId }
+    });
+
+    if (!contract || contract.creatorId !== req.user.id) {
+        throw new ApiError(404, "Contract not found or unauthorized.");
     }
 
-    await session.commitTransaction();
+    // Check if user has enough wallet balance
+    const wallet = await prisma.wallet.findUnique({ where: { userId: req.user.id } });
+    const amount = new Prisma.Decimal(contract.stakeAmount);
 
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(
-          200,
-          { contract },
-          `Contract ${contract.status} successfully`,
-        ),
-      );
-  } catch (error) {
-    await session.abortTransaction();
-    throw new ApiError(
-      error.statusCode || 500,
-      error.message || "Failed to process payout transaction.",
-    );
-  } finally {
-    session.endSession();
-  }
+    if (wallet && new Prisma.Decimal(wallet.availableBalance).gte(amount)) {
+        // FAST PATH: If user has enough balance, atomically lock+activate via wallet engine.
+        const activatedContract = await walletService.activateContractWithWallet(req.user.id, contract.id);
+        const delay = Math.max(0, new Date(activatedContract.deadline).getTime() - Date.now());
+        try {
+            await queueService.scheduleTaskDeadline(contract.id, delay);
+        } catch (error) {
+            logger.error("Failed to schedule deadline after activation. Rolling back activation.", {
+                contractId: contract.id,
+                error: error?.stack || error?.message
+            });
+            await walletService.rollbackActivation(contract.id);
+            throw new ApiError(503, "Temporary queue issue. Please retry activation.");
+        }
+
+        console.log(`\n🔒 [STAKE LOCKED - TASK ACTIVATED] ──────────────────`);
+        console.log(`   Contract : ${contract.id}`);
+        console.log(`   Title    : "${contract.title}"`);
+        console.log(`   Creator  : ${req.user.id}`);
+        console.log(`   Stake    : ₹${amount}  (from wallet balance)`);
+        console.log(`   Deadline : ${new Date(activatedContract.deadline).toLocaleString('en-IN')}`);
+        console.log(`   Status   : PENDING_DEPOSIT → ACTIVE`);
+        console.log(`   ⏰ Deadline job queued in ${Math.round(delay / 1000)}s`);
+        console.log(`─────────────────────────────────────────────────────\n`);
+
+        return res.status(200).json(new ApiResponse(200, { activated: true, contract: activatedContract }, "Stake locked from wallet balance. Task is now ACTIVE."));
+    }
+
+    console.log(`\n⚠️  [STAKE FAILED] Insufficient balance for Contract ${contract.id}. User ${req.user.id} needs top-up.\n`);
+    return res.status(400).json(new ApiResponse(400, { needsTopUp: true }, "Insufficient wallet balance. Please top up your wallet first."));
 });
 
-// Generate Cloudinary signature for frontend uploads
+/**
+ * 3. UPLOAD PROOF (CREATOR)
+ */
+const uploadProof = asyncHandler(async (req, res) => {
+    const { contractId } = req.params;
+    const { proofText, proofImages, proofLinks } = req.body;
+
+    const contract = await prisma.contract.findUnique({ where: { id: contractId } });
+    if (!contract || contract.creatorId !== req.user.id || contract.status !== "ACTIVE") {
+        throw new ApiError(400, "Invalid contract state for proof submission.");
+    }
+
+    const updatedContract = await prisma.contract.update({
+        where: { id: contractId },
+        data: {
+            proofText,
+            proofImages,
+            proofLinks,
+            status: "VALIDATING"
+        }
+    });
+
+    // Schedule grace period for validator review (Ghosting Prevention)
+    // If they don't review in 24 hours, creator is automatically REFUNDED.
+    const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000; 
+    await queueService.scheduleGracePeriod(contractId, GRACE_PERIOD_MS);
+
+    console.log(`\n📤 [PROOF SUBMITTED] ─────────────────────────────────`);
+    console.log(`   Contract : ${contractId}`);
+    console.log(`   Creator  : ${req.user.id}`);
+    console.log(`   Status   : ACTIVE → VALIDATING`);
+    console.log(`   Proof    : text=${!!proofText}, images=${proofImages?.length || 0}, links=${proofLinks?.length || 0}`);
+    console.log(`   ⏳ Grace period job queued (24h — ghosting prevention)`);
+    console.log(`─────────────────────────────────────────────────────\n`);
+
+    return res.status(200).json(new ApiResponse(200, updatedContract, "Proof submitted. Validator has been notified."));
+});
+
+/**
+ * 4. VERIFY PROOF (VALIDATOR)
+ */
+const verifyProof = asyncHandler(async (req, res) => {
+    const { contractId } = req.params;
+    const { isApproved, approved } = req.body; // Accept both for robustness
+    const decision = isApproved !== undefined ? isApproved : approved;
+
+    const contract = await prisma.contract.findUnique({ where: { id: contractId } });
+    if (!contract || contract.validatorId !== req.user.id || contract.status !== "VALIDATING") {
+        throw new ApiError(400, "Invalid contract state for verification.");
+    }
+
+    console.log(`\n${decision ? '✅' : '❌'} [VALIDATOR DECISION] ────────────────────────────`);
+    console.log(`   Contract : ${contractId}`);
+    console.log(`   Title    : "${contract.title}"`);
+    console.log(`   Validator: ${req.user.id}`);
+    console.log(`   Decision : ${decision ? 'APPROVED → Stake refunded to creator' : 'REJECTED → Stake awarded to validator'}`);
+    console.log(`   Stake    : ₹${contract.stakeAmount}`);
+    console.log(`─────────────────────────────────────────────────────`);
+
+    // Use Wallet Engine to settle
+    await walletService.settleContract(contract.id, decision);
+
+    console.log(`   💰 Settlement complete. Status → ${decision ? 'COMPLETED' : 'REJECTED'}`);
+    console.log(`─────────────────────────────────────────────────────\n`);
+
+    return res.status(200).json(new ApiResponse(200, {}, decision ? "Task approved. Stake refunded to creator." : "Task rejected. Stake awarded to you."));
+});
+
+const getUserContracts = asyncHandler(async (req, res) => {
+    const contracts = await prisma.contract.findMany({
+        where: {
+            OR: [
+                { creatorId: req.user.id },
+                { validatorId: req.user.id }
+            ]
+        },
+        orderBy: { createdAt: 'desc' }
+    });
+    return res.status(200).json(new ApiResponse(200, { contracts }, "Contracts fetched."));
+});
+
+const getContractById = asyncHandler(async (req, res) => {
+    const contract = await prisma.contract.findUnique({
+        where: { id: req.params.contractId },
+        include: { creator: { select: { fullName: true } }, validator: { select: { fullName: true } } }
+    });
+    if (!contract) throw new ApiError(404, "Contract not found");
+    return res.status(200).json(new ApiResponse(200, contract, "Contract fetched."));
+});
+
 const getUploadSignature = asyncHandler(async (req, res) => {
-  const signatureData = generateCloudinarySignature();
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, signatureData, "Cloudinary upload signature generated"),
+    const timestamp = Math.round((new Date()).getTime() / 1000);
+    const signature = cloudinary.utils.api_sign_request(
+        {
+            timestamp: timestamp,
+            folder: 'doordie_proofs',
+        },
+        process.env.CLOUDINARY_API_SECRET
     );
+
+    return res.status(200).json(new ApiResponse(200, {
+        signature,
+        timestamp,
+        cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+        apiKey: process.env.CLOUDINARY_API_KEY
+    }, "Signature generated."));
 });
 
-// Delete an unpaid contract (Triggered by Creator)
 const deleteContract = asyncHandler(async (req, res) => {
-  const { contractId } = req.params;
-
-  const contract = await Contract.findById(contractId);
-  if (!contract) {
-    throw new ApiError(404, "Contract not found");
-  }
-
-  // Only creator can delete their own contract
-  if (contract.creator.toString() !== req.user._id.toString()) {
-    throw new ApiError(403, "You can only delete your own tasks");
-  }
-
-  // Only allow deletion for:
-  // 1. Unpaid drafts (PENDING_PAYMENT), regardless of deadline.
-  // 2. Finalized tasks (COMPLETED, REJECTED, FAILED).
-  // Restriction: Prevents deleting ACTIVE or VALIDATING tasks where funds are on hold.
-  const deletableStatuses = ["PENDING_PAYMENT", "COMPLETED", "REJECTED", "FAILED"];
-  if (!deletableStatuses.includes(contract.status)) {
-    throw new ApiError(400, `Tasks in ${contract.status} status cannot be deleted as they have active funds on hold.`);
-  }
-
-  await Contract.findByIdAndDelete(contractId);
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, null, "Contract deleted successfully"));
+    const contract = await prisma.contract.findUnique({ where: { id: req.params.contractId } });
+    const deletableStatuses = ["PENDING_DEPOSIT", "PENDING_PAYMENT", "COMPLETED", "REJECTED", "FAILED"];
+    if (!contract || contract.creatorId !== req.user.id || !deletableStatuses.includes(contract.status)) {
+        throw new ApiError(400, "Cannot delete this contract.");
+    }
+    await prisma.contract.delete({ where: { id: req.params.contractId } });
+    return res.status(200).json(new ApiResponse(200, {}, "Contract deleted."));
 });
 
-// Webhook logic has been moved to src/controllers/webhook.controller.js
-// for better separation of concerns and high-resiliency ingestion.
-
-export {
-  createContract,
-  generatePaymentOrder,
-  verifyPayment,
-  getUserContracts,
-  getContractById,
-  uploadProof,
-  verifyProof,
-  getUploadSignature,
-  deleteContract,
+export { 
+    createContract, 
+    generatePaymentOrder, 
+    uploadProof, 
+    verifyProof, 
+    getUserContracts, 
+    getContractById, 
+    getUploadSignature, 
+    deleteContract 
 };

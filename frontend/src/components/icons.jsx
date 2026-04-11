@@ -140,6 +140,15 @@ export function IconCalendar({ className }) {
   );
 }
 
+export function IconClock({ className }) {
+  return (
+    <Icon className={className}>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </Icon>
+  );
+}
+
 export function IconCreditCard({ className }) {
   return (
     <Icon className={className}>

@@ -31,9 +31,9 @@ const TermsPage = () => {
         <div>
           <h2 className="text-xl font-bold mb-3">4) Payments, Escrow, and Payouts</h2>
           <ul className="list-disc ml-5 space-y-2 text-slate-600">
-            <li>Payments and payouts run through Stripe. By funding a task, you authorize us to hold and disburse funds per task outcome.</li>
-            <li>Creators must pay the stake before a task becomes active. Validators must have a linked Stripe Connect account to receive payouts.</li>
-            <li>Stripe may require KYC to enable payouts. You agree to provide accurate documents if requested. Lack of KYC can delay or block payouts. Fees (if any) are shown at checkout; bank/card charges may apply.</li>
+            <li>This deployment uses a simulated wallet for demonstration. Balances, stakes, and payouts are not real money and do not connect to a payment processor.</li>
+            <li>Creators lock stake from their demo wallet before a task becomes active. Validators receive simulated payouts when outcomes are recorded.</li>
+            <li>There is no real checkout, card capture, or bank transfer in this demo build.</li>
           </ul>
         </div>
 

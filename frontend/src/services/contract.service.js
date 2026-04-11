@@ -13,27 +13,21 @@ const contractService = {
         return response.data;
     },
 
-    // Draft a new contract, pushing it into the PENDING_PAYMENT state
+    // Draft a new contract in PENDING_DEPOSIT state
     createContract: async (contractData) => {
         const response = await api.post('/contracts/new', contractData);
         return response.data;
     },
 
-    // Step 1 of payment: Generate a Stripe PaymentIntent (client_secret) for an existing contract
+    // Activate task by locking stake from wallet (or return needsTopUp)
     generatePaymentIntent: async (contractId) => {
         const response = await api.post(`/contracts/pay/${contractId}`);
         return response.data;
     },
 
-    // Step 1 of payment (Legacy/Shortcut): Create a new task and get a Stripe PaymentIntent
+    // Legacy shortcut: create task via alternate API (not used by main dashboard flow)
     startTask: async (taskData) => {
         const response = await api.post('/tasks/start', taskData);
-        return response.data;
-    },
-
-    // Step 2 of payment: Notify the backend that the Stripe hold is successful
-    verifyPayment: async (stripePaymentIntentId) => {
-        const response = await api.post(`/contracts/verify-payment/${stripePaymentIntentId}`);
         return response.data;
     },
 

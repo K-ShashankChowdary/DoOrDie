@@ -1,22 +1,28 @@
-import React, { useState, useEffect } from "react";
-import { format } from "date-fns";
+import React, { useState, useEffect, useMemo } from "react";
+import { format, formatDistanceToNow } from "date-fns";
 import contractService from "../../services/contract.service";
 import { useAuth } from "../../context/AuthContext";
 import SubmitProofModal from "../SubmitProofModal";
 import ReviewProofModal from "../ReviewProofModal";
-import CheckoutModal from "../modals/CheckoutModal";
 import {
   IconAlertCircle,
   IconCalendar,
-  IconCreditCard,
+  IconWallet,
   IconIndianRupee,
   IconUpload,
   IconCheckCircle,
   IconTrash,
   IconActivity,
+  IconClock,
 } from "../icons";
 
 const STATUS = {
+  PENDING_DEPOSIT: {
+    label: "To activate",
+    chipCls: "status-chip warning",
+    accent: "#f59e0b",
+    pulse: false,
+  },
   PENDING_PAYMENT: {
     label: "To activate",
     chipCls: "status-chip warning",
@@ -64,21 +70,25 @@ const STATUS = {
 /**
  * TaskCard component for managing individual staking tasks.
  * 
- * Why: This component handles the lifecycle of a task from PENDING_PAYMENT to completion.
- * It provides the trigger for the Stripe CheckoutModal for auth-and-hold staking.
+ * Why: This component handles the lifecycle of a task from pending deposit to completion.
+ * Activation now uses wallet balance directly.
  */
 const TaskCard = ({ task, onRefetch }) => {
   const { user } = useAuth();
-  const { _id, title, description, stakeAmount, deadline, status } = task;
+  const { id, title, description, stakeAmount, deadline, status } = task;
   
-  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [clientSecret, setClientSecret] = useState("");
   const [isInitializing, setIsInitializing] = useState(false);
   const [initError, setInitError] = useState(null);
 
   const [isProofModalOpen, setIsProofModalOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [timeTick, setTimeTick] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setTimeTick((t) => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   // Auto-refresh when the deadline exactly hits
   useEffect(() => {
@@ -93,20 +103,40 @@ const TaskCard = ({ task, onRefetch }) => {
     }
   }, [deadline, status, onRefetch]);
 
-  const taskCreatorId = typeof task.creator === 'object' ? task.creator?._id : task.creator;
-  const isCreator = user && user._id === taskCreatorId;
+  const taskCreatorId = typeof task.creator === 'object' ? task.creator?.id : task.creatorId || task.creator;
+  const isCreator =
+    user &&
+    user.id != null &&
+    taskCreatorId != null &&
+    String(user.id) === String(taskCreatorId);
 
-  const isExpiredPending = new Date(deadline) < new Date() && status === "PENDING_PAYMENT";
+  const isExpiredPending = new Date(deadline) < new Date() && (status === "PENDING_PAYMENT" || status === "PENDING_DEPOSIT");
   
   const cfg = isExpiredPending ? {
     label: "Expired",
     chipCls: "status-chip danger",
     accent: "#ef4444",
     pulse: false,
-  } : (STATUS[status] || STATUS.PENDING_PAYMENT);
+  } : (STATUS[status] || STATUS.PENDING_DEPOSIT);
   
   const deadlineDate = new Date(deadline);
   const isOverdue = deadlineDate < new Date() && status === "ACTIVE";
+
+  const deadlineHint = useMemo(() => {
+    const t = new Date();
+    if (status !== "ACTIVE") return null;
+    const end = new Date(deadline);
+    if (end < t) {
+      return { tone: "danger", text: "Deadline passed — settlement runs automatically." };
+    }
+    const ms = end.getTime() - t.getTime();
+    const dist = formatDistanceToNow(end, { addSuffix: true });
+    if (ms < 86_400_000) {
+      return { tone: "warn", text: `Due ${dist}`, sub: "Submit proof before this time or your stake goes to your validator." };
+    }
+    return { tone: "calm", text: `Due ${dist}`, sub: "Upload proof before the deadline to keep your stake." };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- timeTick forces countdown text refresh every 30s
+  }, [status, deadline, timeTick]);
 
   // Force close the proof modal if the deadline hits while it's open
   useEffect(() => {
@@ -115,21 +145,29 @@ const TaskCard = ({ task, onRefetch }) => {
     }
   }, [isOverdue, isProofModalOpen]);
 
-  /**
-   * Initializes the Stripe payment flow by requesting a client_secret from the backend.
-   * 
-   * Why: The client_secret is a unique identifier for the PaymentIntent and is required
-   * for the frontend Stripe SDK to securely confirm the payment.
-   */
+  // Activate task by locking stake from wallet balance.
   const handleStartPayment = async () => {
     setInitError(null);
     setIsInitializing(true);
     try {
-      const res = await contractService.generatePaymentIntent(_id);
-      setClientSecret(res.data.clientSecret);
-      setIsCheckoutOpen(true);
+      const res = await contractService.generatePaymentIntent(id);
+
+      if (res?.data?.activated) {
+        if (onRefetch) onRefetch();
+        return;
+      }
+      if (res?.data?.needsTopUp) {
+        setInitError("Insufficient wallet balance. Please top up your wallet and try again.");
+        return;
+      }
+      setInitError("Unable to activate task right now. Please try again.");
     } catch (err) {
-      setInitError(err.response?.data?.message || err.message || "Failed to initialize payment");
+      const body = err.response?.data;
+      if (body?.data?.needsTopUp) {
+        setInitError("Insufficient wallet balance. Please top up your wallet and try again.");
+        return;
+      }
+      setInitError(body?.message || err.message || "Failed to activate task");
     } finally {
       setIsInitializing(false);
     }
@@ -138,7 +176,7 @@ const TaskCard = ({ task, onRefetch }) => {
   const handleDelete = async () => {
     setIsDeleting(true);
     try {
-      await contractService.deleteContract(_id);
+      await contractService.deleteContract(id);
       if (onRefetch) onRefetch();
     } catch (err) {
       console.error("Failed to delete task:", err);
@@ -165,7 +203,7 @@ const TaskCard = ({ task, onRefetch }) => {
               {cfg.pulse && <span className="pulse-dot-sm" />}
               {cfg.label}
             </span>
-            {isCreator && (["PENDING_PAYMENT", "COMPLETED", "REJECTED", "FAILED"].includes(status)) && (
+            {isCreator && (["PENDING_PAYMENT", "PENDING_DEPOSIT", "COMPLETED", "REJECTED", "FAILED"].includes(status)) && (
               <button
                 type="button"
                 onClick={handleDelete}
@@ -207,8 +245,39 @@ const TaskCard = ({ task, onRefetch }) => {
           </div>
         </div>
 
+        {deadlineHint && (
+          <div
+            className={`task-card-new__timeline task-card-new__timeline--${deadlineHint.tone}`}
+            role="status"
+          >
+            <div className="task-card-new__timeline-icon" aria-hidden>
+              <IconClock className="w-4 h-4" />
+            </div>
+            <div className="task-card-new__timeline-text">
+              <p className="task-card-new__timeline-title">{deadlineHint.text}</p>
+              {deadlineHint.sub && (
+                <p className="task-card-new__timeline-sub">{deadlineHint.sub}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {status === "VALIDATING" && isCreator && (
+          <div className="task-card-new__timeline task-card-new__timeline--grace" role="status">
+            <div className="task-card-new__timeline-icon" aria-hidden>
+              <IconCheckCircle className="w-4 h-4" />
+            </div>
+            <div className="task-card-new__timeline-text">
+              <p className="task-card-new__timeline-title">Proof submitted — awaiting validator</p>
+              <p className="task-card-new__timeline-sub">
+                They have 24 hours to approve or reject. If they don’t respond in time, your stake is refunded automatically.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Action Section */}
-        {status === "PENDING_PAYMENT" && (
+        {(status === "PENDING_PAYMENT" || status === "PENDING_DEPOSIT") && (
           <div className="task-card-new__pay">
             {isExpiredPending ? (
               <div className="task-card-new__expired items-center text-center">
@@ -226,7 +295,7 @@ const TaskCard = ({ task, onRefetch }) => {
                 )}
                 <button
                   type="button"
-                  id={`pay-btn-${_id}`}
+                  id={`pay-btn-${id}`}
                   onClick={handleStartPayment}
                   disabled={isInitializing}
                   className="task-card-new__pay-btn"
@@ -234,12 +303,12 @@ const TaskCard = ({ task, onRefetch }) => {
                   {isInitializing ? (
                     <>
                       <span className="spinner w-4 h-4 !border-2 !border-white/30 !border-t-white" />
-                      Loading Secure Checkout…
+                      Activating...
                     </>
                   ) : (
                     <>
-                      <IconCreditCard className="w-4 h-4" />
-                      Secure Stake Hold (₹{stakeAmount})
+                      <IconWallet className="w-4 h-4" />
+                      Activate with Wallet (₹{stakeAmount})
                     </>
                   )}
                 </button>
@@ -287,17 +356,8 @@ const TaskCard = ({ task, onRefetch }) => {
         )}
       </div>
 
-      <SubmitProofModal isOpen={isProofModalOpen} onClose={() => setIsProofModalOpen(false)} contractId={_id} onSuccess={onRefetch} />
+      <SubmitProofModal isOpen={isProofModalOpen} onClose={() => setIsProofModalOpen(false)} contractId={id} onSuccess={onRefetch} />
       <ReviewProofModal task={task} isOpen={isReviewModalOpen} onClose={() => setIsReviewModalOpen(false)} onSuccess={onRefetch} />
-      
-      <CheckoutModal 
-        isOpen={isCheckoutOpen} 
-        onClose={() => setIsCheckoutOpen(false)} 
-        clientSecret={clientSecret}
-        taskTitle={title}
-        stakeAmount={stakeAmount}
-        onSuccess={onRefetch}
-      />
     </div>
   );
 };

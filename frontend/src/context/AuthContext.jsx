@@ -18,11 +18,9 @@ export const AuthProvider = ({ children }) => {
 
     const checkAuthStatus = async () => {
         try {
-            // Attempt to restore session
             const response = await api.post('/users/refresh-token');
             setUser(response.data.data.user);
         } catch {
-            // No valid session, or token expired/invalid
             setUser(null);
         } finally {
             setLoading(false);
@@ -47,38 +45,32 @@ export const AuthProvider = ({ children }) => {
 
     const logout = async () => {
         try {
-            // Notify server to clear refresh token
             await api.post('/users/logout');
         } catch (error) {
             console.error('Logout failed:', error);
         } finally {
-            // Always clear the local session state
             setUser(null);
         }
     };
 
-    const linkStripe = async () => {
-        const response = await api.post('/users/stripe-onboard');
-        const { onboardingUrl } = response.data.data;
-        if (onboardingUrl) {
-            // Redirect user to Stripe's hosted onboarding experience
-            window.location.href = onboardingUrl;
-        }
-        return response.data;
-    };
-
-    const verifyStripeStatus = async () => {
-        const response = await api.get('/users/verify-stripe');
-        const { stripeOnboardingComplete } = response.data.data;
-        if (stripeOnboardingComplete) {
-            setUser(prev => ({ ...prev, stripeOnboardingComplete: true }));
-        }
-        return response.data;
-    };
-
     const getBalance = async () => {
         const response = await api.get('/users/balance');
-        return response.data;
+        return response?.data;
+    };
+
+    const createTopupSession = async (amount) => {
+        const response = await api.post('/users/wallet/topup', { amount });
+        return response?.data;
+    };
+
+    const requestWithdrawal = async (amount) => {
+        const response = await api.post('/users/wallet/withdraw', { amount });
+        return response?.data;
+    };
+
+    const getWithdrawalHistory = async () => {
+        const response = await api.get('/users/wallet/withdrawals');
+        return response?.data;
     };
 
     const value = {
@@ -87,9 +79,10 @@ export const AuthProvider = ({ children }) => {
         login,
         logout,
         signup,
-        linkStripe,
-        verifyStripeStatus,
         getBalance,
+        createTopupSession,
+        requestWithdrawal,
+        getWithdrawalHistory,
         setUser
     };
 

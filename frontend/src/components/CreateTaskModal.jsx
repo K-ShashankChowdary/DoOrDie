@@ -83,7 +83,7 @@ const CreateTaskModal = ({ onClose, onTaskCreated }) => {
         description: formData.description,
         stakeAmount: Number(formData.stakeAmount),
         deadline: formData.deadline,
-        validator: formData.validator._id,
+        validatorId: formData.validator.id,
       });
       onTaskCreated(result.data.contract);
       onClose();
@@ -264,7 +264,7 @@ const CreateTaskModal = ({ onClose, onTaskCreated }) => {
                     <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200/90 shadow-[var(--elev-3)] rounded-xl overflow-hidden z-20 ring-1 ring-slate-900/5">
                       {searchResults.map((user) => (
                         <div
-                          key={user._id}
+                          key={user.id}
                           className="p-3 hover:bg-slate-50/90 cursor-pointer flex justify-between items-center gap-3 transition-colors border-b border-slate-100 last:border-0"
                           onClick={() => handleSelectValidator(user)}
                         >

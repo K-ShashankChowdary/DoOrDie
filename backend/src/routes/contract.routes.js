@@ -2,7 +2,6 @@ import { Router } from "express";
 import { 
     createContract, 
     generatePaymentOrder, 
-    verifyPayment,
     getUserContracts,
     getContractById,
     uploadProof,
@@ -10,7 +9,7 @@ import {
     getUploadSignature,
     deleteContract
 } from "../controllers/contract.controller.js";
-import { verifyJWT } from "../middleware/auth.middleware.js";
+import { verifyJWT } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
@@ -21,13 +20,9 @@ router.use(verifyJWT);
 // POST: /api/v1/contracts/new
 router.route("/new").post(createContract);
 
-// Generate the Stripe PaymentIntent (Triggered when user clicks "Pay")
+// Lock stake from wallet and activate task (demo)
 // POST: /api/v1/contracts/pay/:contractId
 router.route("/pay/:contractId").post(generatePaymentOrder);
-
-// Verify the Stripe Hold (Triggered after successful checkout)
-// POST: /api/v1/contracts/verify-payment/:stripePaymentIntentId
-router.route("/verify-payment/:stripePaymentIntentId").post(verifyPayment);
 
 // Get Cloudinary Upload Signature
 // GET: /api/v1/contracts/upload-signature

@@ -7,15 +7,15 @@ const ReviewProofModal = ({ task, isOpen, onClose, onSuccess }) => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
 
-    if (!isOpen) return null;
+    if (!isOpen || !task) return null;
 
-    const { _id, proofImages, proofLinks, proofText } = task;
+    const { id, proofImages, proofLinks, proofText } = task;
 
     const handleVerify = async (isApproved) => {
         setError('');
         setIsSubmitting(true);
         try {
-            await contractService.verifyProof(_id, { isApproved });
+            await contractService.verifyProof(id, { isApproved });
             if (onSuccess) onSuccess();
             onClose();
         } catch (err) {

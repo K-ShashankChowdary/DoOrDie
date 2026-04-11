@@ -1,89 +1,98 @@
 import { Worker } from "bullmq";
-import { Contract } from "../models/contract.model.js";
-import { stripeService } from "../services/stripe.service.js";
 import { redisService as connection } from "../services/redis.service.js";
+import { walletService } from "../services/wallet.service.js";
+import { ApiError } from "../utils/ApiError.js";
+import prisma from "../db/prisma.js";
+import logger from "../utils/logger.js";
+
+/** Normal proof submission (not the internal deadline bridge state). */
+function hasProofSubmitted(contract) {
+    const text = contract.proofText?.trim();
+    const imgs = Array.isArray(contract.proofImages) && contract.proofImages.length > 0;
+    const links = Array.isArray(contract.proofLinks) && contract.proofLinks.length > 0;
+    return !!(text || imgs || links);
+}
 
 /**
- * Worker to handle automated task settlement when the deadline expires.
- * 
- * Why: This ensures that creators are held accountable even if a validator 
- * doesn't manually review the task, and that validators receive their 
- * stake payout for any failed tasks.
+ * DEADLINE WORKER — no proof by deadline → creator forfeits (validator + platform fee).
+ *
+ * settleContract only accepts VALIDATING; we bridge ACTIVE → VALIDATING when the deadline
+ * passes with no proof. If settlement fails after the bridge, retries must still settle
+ * from VALIDATING + empty proof (recovery).
  */
-export const deadlineWorker = new Worker("task-deadline-queue", async (job) => {
-    const { contractId } = job.data;
-    console.log(`[Worker] Processing deadline for contract: ${contractId}`);
+const deadlineWorker = new Worker(
+    "task-deadline-queue",
+    async (job) => {
+        const { contractId } = job.data;
+        logger.info(`Deadline job start`, { contractId, jobId: job.id });
 
-    // 1. Retrieve the contract with the validator populated
-    const contract = await Contract.findById(contractId).populate("validator");
-    if (!contract) {
-        console.warn(`[Worker] Contract ${contractId} not found. Skipping.`);
-        return;
-    }
+        try {
+            let contract = await prisma.contract.findUnique({ where: { id: contractId } });
+            if (!contract) {
+                logger.info(`Deadline skip: contract deleted`, { contractId });
+                return;
+            }
 
-    // 2. Handle Case: Task was already COMPLETED by a validator
-    // In this case, we simply release the hold and void the PaymentIntent.
-    if (contract.status === "COMPLETED") {
-        console.log(`[Worker] Contract ${contractId} was COMPLETED. Releasing hold.`);
-        if (contract.stripePaymentIntentId) {
-            await stripeService.cancelHold(contract.stripePaymentIntentId);
+            const deadlineMs = new Date(contract.deadline).getTime();
+            if (deadlineMs > Date.now() + 3000) {
+                logger.warn(`Deadline job ran before deadline`, { contractId, deadline: contract.deadline });
+                return;
+            }
+
+            if (contract.status === "ACTIVE") {
+                const transitioned = await prisma.contract.updateMany({
+                    where: { id: contractId, status: "ACTIVE" },
+                    data: { status: "VALIDATING" },
+                });
+                if (transitioned.count !== 1) {
+                    contract = await prisma.contract.findUnique({ where: { id: contractId } });
+                    if (!contract || contract.status !== "VALIDATING" || hasProofSubmitted(contract)) {
+                        logger.info(`Deadline skip: could not bridge ACTIVE (race or already settled)`, {
+                            contractId,
+                            status: contract?.status,
+                        });
+                        return;
+                    }
+                }
+            } else if (contract.status === "VALIDATING") {
+                if (hasProofSubmitted(contract)) {
+                    logger.info(`Deadline skip: proof exists — validator / grace path`, { contractId });
+                    return;
+                }
+            } else {
+                logger.info(`Deadline skip: status`, { contractId, status: contract.status });
+                return;
+            }
+
+            try {
+                await walletService.settleContract(contractId, false);
+                logger.info(`Deadline settlement complete`, { contractId });
+            } catch (err) {
+                if (err instanceof ApiError && err.statusCode === 409) {
+                    logger.info(`Deadline settle idempotent skip`, { contractId, message: err.message });
+                    return;
+                }
+                throw err;
+            }
+        } catch (error) {
+            logger.error(`Deadline processing failure`, {
+                contractId,
+                error: error?.stack || error?.message,
+            });
+            throw error;
         }
-        return;
-    }
+    },
+    { connection, skipConfigCheck: true }
+);
 
-    // 3. Handle Case: Task is still ACTIVE (or VALIDATING) after the deadline
-    // We use the Atomic Update Pattern to ensure only one process manages the failure.
-    // Why: Prevents race conditions where a validator completes a task at the same instant.
-    const failedContract = await Contract.findOneAndUpdate(
-        { 
-            _id: contractId, 
-            status: { $in: ["ACTIVE", "VALIDATING"] } 
-        },
-        { 
-            $set: { status: "FAILED" } 
-        },
-        { new: true }
-    ).populate("validator");
-
-    if (!failedContract) {
-        console.log(`[Worker] Contract ${contractId} status changed externally. No action needed.`);
-        return;
-    }
-
-    // 4. Capture Stake & Remit to Validator
-    // Only proceed if we have the necessary Stripe identifiers.
-    if (failedContract.stripePaymentIntentId && failedContract.validator?.stripeAccountId) {
-        // Calculate payouts
-        const platformFeePercentage = Number(process.env.PLATFORM_FEE_PERCENTAGE) || 10;
-        const totalStake = failedContract.stakeAmount;
-        const platformFee = totalStake * (platformFeePercentage / 100);
-        const payoutAmount = totalStake - platformFee;
-
-        console.log(`[Worker] Capturing hold for ${contractId}. Fee: ${platformFeePercentage}%. Payout: ₹${payoutAmount}.`);
-
-        // Capture hold and transfer directly to the validator's Connect account
-        const transfer = await stripeService.captureHoldAndTransfer(
-            failedContract.stripePaymentIntentId,
-            payoutAmount,
-            failedContract.validator.stripeAccountId,
-            `Payout for failed task: ${failedContract.title}`
-        );
-
-        // Record the transfer ID for auditing
-        failedContract.stripeTransferId = transfer.id;
-        await failedContract.save();
-
-        console.log(`[Worker] Settlement complete for ${contractId}. Transfer: ${transfer.id}`);
-    } else {
-        console.error(`[Worker] Critical Failure: Missing payment intent or validator account for ${contractId}`);
-    }
-}, { connection });
-
-// Observer event listeners for observability
 deadlineWorker.on("completed", (job) => {
-    console.log(`[Worker] Job ${job.id} completed successfully.`);
+    logger.info(`Deadline job completed`, { jobId: job.id });
 });
 
 deadlineWorker.on("failed", (job, err) => {
-    console.error(`[Worker] Job ${job?.id} failed: ${err.message}`);
+    logger.error(`Deadline job failed`, { jobId: job?.id, error: err?.message });
 });
+
+console.log("[Worker] Deadline worker started and listening to 'task-deadline-queue'...");
+
+export { deadlineWorker };

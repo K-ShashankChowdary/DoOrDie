@@ -13,6 +13,7 @@ const ValidationsPage = () => {
     const { user } = useAuth();
     const [tasks, setTasks] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
 
     const fetchTasks = async () => {
         try {
@@ -27,15 +28,17 @@ const ValidationsPage = () => {
 
     useEffect(() => {
         fetchTasks();
+        const interval = setInterval(fetchTasks, 15000);
+        return () => clearInterval(interval);
     }, []);
 
     const firstName = user?.fullName?.split(' ')[0] || 'there';
 
-    // Only validation tasks
     const validationTasks = useMemo(() => {
-        return tasks.filter(t => {
-            const validatorId = typeof t.validator === 'object' ? t.validator?._id : t.validator;
-            return validatorId?.toString() === user?._id?.toString();
+        return tasks.filter((t) => {
+            if (!t) return false;
+            const validatorId = typeof t.validator === "object" ? t.validator?.id : t.validatorId || t.validator;
+            return validatorId?.toString() === user?.id?.toString();
         });
     }, [tasks, user]);
 
@@ -47,80 +50,83 @@ const ValidationsPage = () => {
     
     return (
         <div className="page-shell bg-transparent">
-            <div className="container-wide dashboard-layout fade-in pt-6">
-                <header className="dashboard-top !border-0 !pb-2">
-                    <div className="dashboard-user">
-                        <div className="space-y-2 min-w-0 flex-1">
-                            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 leading-tight tracking-tight">
-                                Validation Requests
-                            </h1>
-                            <p className="text-sm text-slate-600 max-w-xl leading-relaxed">
-                                Review work completed by other users to unlock their deposits.
-                            </p>
-                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                                Assigned to {firstName}
-                            </p>
-                        </div>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+                {/* ── Page Header ──────────────────────────────── */}
+                <header className="flex flex-wrap items-start sm:items-center justify-between gap-3 mb-8">
+                    <div>
+                        <h1 className="text-2xl sm:text-3xl font-black text-slate-900 leading-tight tracking-tight">
+                            Validate Tasks
+                        </h1>
+                        <p className="text-sm text-slate-500 mt-1">
+                            Review proof submitted by creators — approve or reject.
+                        </p>
                     </div>
+                    <div className="flex-shrink-0 px-4 py-1.5 rounded-xl text-xs font-bold text-slate-600 bg-white/90 border border-slate-200 shadow-sm">
+                        {firstName}'s queue
+                    </div>
+                    <button
+                        type="button"
+                        onClick={async () => {
+                            setRefreshing(true);
+                            await fetchTasks();
+                            setRefreshing(false);
+                        }}
+                        className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition-all"
+                    >
+                        {refreshing ? 'Refreshing...' : 'Refresh'}
+                    </button>
                 </header>
 
-                <section className="dashboard-hero grid grid-cols-1 sm:grid-cols-3 gap-4" aria-label="Task overview">
-                    <div className="stat-card stat-card--blue h-28">
-                        <div className="stat-card__head">
-                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Awaiting Review</p>
-                            <div className="stat-card__icon-wrap" aria-hidden>
-                                <IconActivity className="w-4 h-4" />
-                            </div>
+                {/* ── Stats Row ─────────────────────────────────── */}
+                <section className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8" aria-label="Validation overview">
+                    <div className="dash-stat-card">
+                        <div className="dash-stat-card__icon" style={{ background: 'rgba(14,165,233,0.1)', color: '#0284c7' }}>
+                            <IconActivity className="w-5 h-5" />
                         </div>
-                        <p className="text-3xl font-bold stat-value leading-none tabular-nums">{validatingCount}</p>
+                        <p className="dash-stat-card__count">{validatingCount}</p>
+                        <p className="dash-stat-card__label">Awaiting Review</p>
                     </div>
-                    <div className="stat-card stat-card--amber h-28">
-                        <div className="stat-card__head">
-                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">In Progress</p>
-                            <div className="stat-card__icon-wrap" aria-hidden>
-                                <IconWallet className="w-4 h-4" />
-                            </div>
+
+                    <div className="dash-stat-card">
+                        <div className="dash-stat-card__icon" style={{ background: 'rgba(245,158,11,0.1)', color: '#d97706' }}>
+                            <IconWallet className="w-5 h-5" />
                         </div>
-                        <p className="text-3xl font-bold stat-value leading-none tabular-nums">{pendingCount}</p>
+                        <p className="dash-stat-card__count">{pendingCount}</p>
+                        <p className="dash-stat-card__label">In Progress</p>
                     </div>
-                    <div className="stat-card stat-card--emerald h-28">
-                        <div className="stat-card__head">
-                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Resolved</p>
-                            <div className="stat-card__icon-wrap" aria-hidden>
-                                <IconCheckCircle className="w-4 h-4" />
-                            </div>
+
+                    <div className="dash-stat-card">
+                        <div className="dash-stat-card__icon" style={{ background: 'rgba(16,185,129,0.1)', color: '#059669' }}>
+                            <IconCheckCircle className="w-5 h-5" />
                         </div>
-                        <p className="text-3xl font-bold stat-value leading-none tabular-nums">{completedCount}</p>
+                        <p className="dash-stat-card__count">{completedCount}</p>
+                        <p className="dash-stat-card__label">Resolved</p>
                     </div>
                 </section>
 
-                <div className="mb-4"></div>
-
+                {/* ── Task List ─────────────────────────────────── */}
                 {loading ? (
-                    <div className="dashboard-loading-surface flex flex-col justify-center items-center gap-5 py-20 px-6">
-                        <span className="spinner w-11 h-11" aria-hidden />
+                    <div className="flex flex-col items-center justify-center py-24 gap-4">
+                        <span className="spinner w-10 h-10" />
                         <p className="text-sm text-slate-500 font-medium">Loading requests…</p>
                     </div>
                 ) : validationTasks.length === 0 ? (
-                    <div className="empty-card w-full max-w-6xl mx-auto text-center flex flex-col items-center justify-center gap-8 py-16 px-6">
-                        <div className="inline-flex items-center justify-center rounded-2xl bg-white/90 p-5 shadow-[var(--elev-2)] ring-1 ring-slate-200/80">
-                            <IconInbox className="w-12 h-12 text-[color:var(--brand-red)]" />
+                    <div className="empty-state-card">
+                        <div className="p-5 bg-slate-100 rounded-full mb-4">
+                            <IconInbox className="w-10 h-10 text-slate-400" />
                         </div>
-                        <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
-                            No validation requests
-                        </h2>
-                        <p className="text-sm text-slate-500 max-w-sm leading-relaxed px-2">
-                            You currently do not have any tasks assigned to you for validation.
+                        <h3 className="text-lg font-bold text-slate-800 mb-1">No validation requests</h3>
+                        <p className="text-slate-500 text-sm text-center max-w-xs">
+                            You haven't been assigned as a validator on any tasks yet.
                         </p>
                     </div>
                 ) : (
-                    <section className="dashboard-tasks-section" aria-label="Validation tasks">
-                        <div className="tasks-grid">
-                            {validationTasks.map(task => (
-                                <TaskCard key={task._id} task={task} onRefetch={fetchTasks} />
-                            ))}
-                        </div>
-                    </section>
+                    <div className="tasks-grid">
+                        {validationTasks.map(task => (
+                            <TaskCard key={task.id} task={task} onRefetch={fetchTasks} />
+                        ))}
+                    </div>
                 )}
             </div>
         </div>

@@ -1,50 +1,63 @@
-import { Worker, Queue } from "bullmq";
-import { Contract } from "../models/contract.model.js";
-import { stripeService } from "../services/stripe.service.js";
+import { Worker } from "bullmq";
 import { redisService as connection } from "../services/redis.service.js";
+import { walletService } from "../services/wallet.service.js";
+import { ApiError } from "../utils/ApiError.js";
+import prisma from "../db/prisma.js";
+import logger from "../utils/logger.js";
 
 /**
- * Worker to automatically handle ghosting validators.
- * If a validator fails to evaluate proof within the grace period, 
- * the creator "wins" by default and their hold is released.
+ * GRACE PERIOD WORKER — validator ghosted for 24h after proof → creator wins (refund).
+ *
+ * Scheduled when proof is uploaded (contract.controller). Idempotent: if the validator
+ * already decided, or the contract left VALIDATING, we skip.
  */
-export const gracePeriodWorker = new Worker("validator-grace-period", async (job) => {
-    const { contractId } = job.data;
-    console.log(`[Worker] Checking grace period for contract: ${contractId}`);
+const gracePeriodWorker = new Worker(
+    "validator-grace-period",
+    async (job) => {
+        const { contractId } = job.data;
+        logger.info(`Grace period job start`, { contractId, jobId: job.id });
 
-    // 1. Use Atomic Update Pattern to ensure we only process if still in VALIDATING
-    // Why: Prevents race conditions where a validator finishes review at the same instant.
-    const releasedContract = await Contract.findOneAndUpdate(
-        { 
-            _id: contractId, 
-            status: "VALIDATING" 
-        },
-        { 
-            $set: { status: "COMPLETED" } 
-        },
-        { new: true }
-    );
+        try {
+            const contract = await prisma.contract.findUnique({ where: { id: contractId } });
+            if (!contract) {
+                logger.info(`Grace skip: contract deleted`, { contractId });
+                return;
+            }
 
-    if (!releasedContract) {
-        console.log(`[Worker] Contract ${contractId} is not in VALIDATING status. Skipping.`);
-        return;
-    }
+            if (contract.status !== "VALIDATING") {
+                logger.info(`Grace skip: not VALIDATING`, { contractId, status: contract.status });
+                return;
+            }
 
-    // 2. Release the Authorized Hold (Funds go back to creator)
-    if (releasedContract.stripePaymentIntentId) {
-        await stripeService.cancelHold(releasedContract.stripePaymentIntentId);
-        console.log(`[Worker] Stripe Authorized hold CANCELED (released) for contract ${releasedContract._id} (Grace Period Expired)`);
-    } else {
-        console.error(`[Worker] CRITICAL: Contract ${releasedContract._id} missing stripePaymentIntentId.`);
-    }
-
-    console.log(`[Worker] Contract ${contractId} grace period expired. Status: COMPLETED (Creator Won).`);
-}, { connection });
+            try {
+                await walletService.settleContract(contractId, true);
+                logger.info(`Grace settlement complete (creator refund)`, { contractId });
+            } catch (error) {
+                if (error instanceof ApiError && error.statusCode === 409) {
+                    logger.info(`Grace settle idempotent skip`, { contractId, message: error.message });
+                    return;
+                }
+                throw error;
+            }
+        } catch (error) {
+            logger.error(`Grace period worker failure`, {
+                contractId,
+                error: error?.stack || error?.message,
+            });
+            throw error;
+        }
+    },
+    { connection, skipConfigCheck: true }
+);
 
 gracePeriodWorker.on("completed", (job) => {
-    console.log(`[Worker] Grace period check job ${job.id} has completed!`);
+    logger.info(`Grace period job completed`, { jobId: job.id });
 });
 
 gracePeriodWorker.on("failed", (job, err) => {
-    console.error(`[Worker] Grace period check job ${job?.id} has failed: ${err.message}`);
+    logger.error(`Grace period job failed`, { jobId: job?.id, error: err?.message });
 });
+
+console.log("[Worker] Grace Period worker started and listening to 'validator-grace-period'...");
+
+export { gracePeriodWorker };

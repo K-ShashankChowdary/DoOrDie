@@ -27,8 +27,25 @@ const redisClient = process.env.REDIS_URL
       })
     : new Redis(connectionOptions);
 
+const ensureNoEvictionPolicy = async () => {
+    try {
+        const policy = await redisClient.config("GET", "maxmemory-policy");
+        const currentPolicy = Array.isArray(policy) ? policy[1] : null;
+        if (currentPolicy && currentPolicy !== "noeviction") {
+            await redisClient.config("SET", "maxmemory-policy", "noeviction");
+            console.log(`Redis maxmemory-policy updated from '${currentPolicy}' to 'noeviction'.`);
+        }
+    } catch (err) {
+        // Some managed Redis providers block CONFIG SET. Keep app running with clear signal.
+        console.warn("Unable to enforce Redis maxmemory-policy=noeviction automatically.", {
+            reason: err?.message,
+        });
+    }
+};
+
 redisClient.on("connect", () => {
     console.log("Redis connected successfully.");
+    ensureNoEvictionPolicy();
 });
 
 redisClient.on("error", (err) => {
