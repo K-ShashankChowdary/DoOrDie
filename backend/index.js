@@ -20,7 +20,7 @@ const startServer = async () => {
 
             // Failsafe: Force kill after 10s if hung
             setTimeout(() => {
-                console.error("[SYSTEM] Shutdown timed out. Forcing exit.");
+                logger.error("[SYSTEM] Shutdown timed out. Forcing exit.");
                 process.exit(1);
             }, 10000);
 
@@ -32,19 +32,19 @@ const startServer = async () => {
                 }
 
                 try {
-                    console.log("[SYSTEM] Closing workers...");
+                    logger.info("[SYSTEM] Closing workers...");
                     await Promise.all([
                         deadlineWorker.close(),
                         gracePeriodWorker.close()
                     ]);
-                    console.log("[SYSTEM] Workers shut down cleanly.");
+                    logger.info("[SYSTEM] Workers shut down cleanly.");
 
                     await prisma.$disconnect();
-                    console.log("[SYSTEM] Prisma disconnected.");
+                    logger.info("[SYSTEM] Prisma disconnected.");
 
                     process.exit(0);
                 } catch (shutdownError) {
-                    console.error("[SYSTEM] Error during coordinated shutdown:", shutdownError);
+                    logger.error("[SYSTEM] Error during coordinated shutdown:", { error: shutdownError });
                     process.exit(1);
                 }
             });
@@ -59,7 +59,7 @@ const startServer = async () => {
         });
 
     } catch (err) {
-        console.error("Critical System Failure during initialization:", err);
+        logger.error("Critical System Failure during initialization:", { error: err });
         process.exit(1);
     }
 };

@@ -20,8 +20,8 @@ const contractService = {
     },
 
     // Activate task by locking stake from wallet (or return needsTopUp)
-    generatePaymentIntent: async (contractId) => {
-        const response = await api.post(`/contracts/pay/${contractId}`);
+    activateContract: async (contractId) => {
+        const response = await api.post(`/contracts/activate/${contractId}`);
         return response.data;
     },
 

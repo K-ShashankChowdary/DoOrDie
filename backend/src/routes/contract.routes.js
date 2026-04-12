@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { 
     createContract, 
-    generatePaymentOrder, 
+    activateTask, 
     getUserContracts,
     getContractById,
     uploadProof,
@@ -21,8 +21,8 @@ router.use(verifyJWT);
 router.route("/new").post(createContract);
 
 // Lock stake from wallet and activate task (demo)
-// POST: /api/v1/contracts/pay/:contractId
-router.route("/pay/:contractId").post(generatePaymentOrder);
+// POST: /api/v1/contracts/activate/:contractId
+router.route("/activate/:contractId").post(activateTask);
 
 // Get Cloudinary Upload Signature
 // GET: /api/v1/contracts/upload-signature

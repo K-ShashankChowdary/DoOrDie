@@ -39,7 +39,7 @@ const AppLayout = () => {
                         {/* Logo & Navigation */}
                         <div className="flex items-center gap-8 min-w-0">
                             <Link to="/dashboard" className="flex-shrink-0 flex items-center gap-2 group cursor-pointer">
-                                <div className="w-8 h-8 rounded-xl flex items-center justify-center transform group-hover:scale-105 transition-transform duration-300 shadow-sm" style={{ background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)' }}>
+                                <div className="w-8 h-8 rounded-xl flex items-center justify-center transform group-hover:scale-105 transition-transform duration-300 shadow-sm" style={{ background: 'var(--brand-grad)' }}>
                                     <span className="text-white font-black text-lg leading-none">D</span>
                                 </div>
                                 <span className="text-xl font-black text-slate-900 tracking-tight">DoOrDie</span>

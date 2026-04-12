@@ -29,8 +29,6 @@ export const verifyJWT = asyncHandler(async (req, _, next) => {
                 fullName: true,
                 email: true,
                 upiId: true,
-                stripeAccountId: true,
-                stripeOnboardingComplete: true,
                 createdAt: true
             }
         });

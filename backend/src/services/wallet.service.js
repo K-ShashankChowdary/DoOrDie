@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../db/prisma.js";
 import { ApiError } from "../utils/ApiError.js";
+import logger from "../utils/logger.js";
 
 // ============================================================================
 // The Virtual Wallet Engine (Shadow Ledger)
@@ -31,7 +32,7 @@ export const walletService = {
       });
 
       if (existingEvent) {
-        console.warn(`[Wallet] StripeEvent ${stripeEventId} already processed.`);
+        logger.warn(`[Wallet] StripeEvent ${stripeEventId} already processed.`);
         return;
       }
 
@@ -62,7 +63,7 @@ export const walletService = {
         },
       });
 
-      console.log(`[Wallet] Credited ₹${decimalAmount.toFixed(2)} to User ${userId}`);
+      logger.info(`[Wallet] Credited ₹${decimalAmount.toFixed(2)} to User ${userId}`);
       return wallet;
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable 
@@ -120,7 +121,7 @@ export const walletService = {
         throw new ApiError(500, "Wallet invariant violation after stake lock.");
       }
 
-      console.log(`[Wallet] Stake of ₹${decimalAmount.toFixed(2)} locked for Contract ${contractId}`);
+      logger.info(`[Wallet] Stake of ₹${decimalAmount.toFixed(2)} locked for Contract ${contractId}`);
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable
     });

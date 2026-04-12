@@ -14,6 +14,7 @@ import {
 const DashboardPage = () => {
     const { user } = useAuth();
     const [tasks, setTasks] = useState([]);
+    const [taskError, setTaskError] = useState(null);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [balance, setBalance] = useState({ available: 0, pending: 0 });
@@ -32,8 +33,10 @@ const DashboardPage = () => {
         try {
             const res = await contractService.getUserContracts();
             setTasks(res.data.contracts || []);
+            setTaskError(null);
         } catch (err) {
             console.error("Failed to load tasks:", err);
+            setTaskError("We couldn't load your tasks right now. Please check your connection and try again.");
         }
     }, []);
 
@@ -190,7 +193,7 @@ const DashboardPage = () => {
                         type="button"
                         onClick={() => setIsModalOpen(true)}
                         className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-2xl text-white font-bold text-sm shadow-lg shadow-blue-500/25 active:scale-95 transition-all"
-                        style={{ background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)' }}
+                        style={{ background: 'var(--brand-grad)' }}
                     >
                         <IconPlus className="w-4 h-4" />
                         <span className="hidden sm:inline">Add Task</span>
@@ -234,7 +237,12 @@ const DashboardPage = () => {
                         </section>
 
                         <main className="dashboard-layout__tasks">
-                            {loading ? (
+                            {taskError ? (
+                                <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-3 mb-6">
+                                    <IconAlertCircle className="w-5 h-5 shrink-0" />
+                                    <p className="text-sm font-medium">{taskError}</p>
+                                </div>
+                            ) : loading ? (
                                 <div className="flex flex-col items-center justify-center py-20 gap-4">
                                     <span className="spinner w-10 h-10" />
                                     <p className="text-sm text-slate-500 font-medium">Loading your tasks…</p>
@@ -262,7 +270,7 @@ const DashboardPage = () => {
                                         type="button"
                                         onClick={() => setIsModalOpen(true)}
                                         className="mt-6 px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-md shadow-blue-500/20 active:scale-95 transition-all"
-                                        style={{ background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)' }}
+                                        style={{ background: 'var(--brand-grad)' }}
                                     >
                                         + Create Task
                                     </button>

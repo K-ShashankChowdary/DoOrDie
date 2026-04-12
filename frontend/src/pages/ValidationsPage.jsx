@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import contractService from '../services/contract.service';
 import TaskCard from '../components/tasks/TaskCard';
 import {
+    IconAlertCircle,
     IconActivity,
     IconCheckCircle,
     IconInbox,
@@ -12,6 +13,7 @@ import {
 const ValidationsPage = () => {
     const { user } = useAuth();
     const [tasks, setTasks] = useState([]);
+    const [taskError, setTaskError] = useState(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -19,8 +21,10 @@ const ValidationsPage = () => {
         try {
             const res = await contractService.getUserContracts();
             setTasks(res.data.contracts || []);
+            setTaskError(null);
         } catch (err) {
             console.error("Failed to load tasks:", err);
+            setTaskError("Failed to load your validations queue. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -106,7 +110,12 @@ const ValidationsPage = () => {
                 </section>
 
                 {/* ── Task List ─────────────────────────────────── */}
-                {loading ? (
+                {taskError ? (
+                     <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-3 mb-6">
+                         <IconAlertCircle className="w-5 h-5 shrink-0" />
+                         <p className="text-sm font-medium">{taskError}</p>
+                     </div>
+                ) : loading ? (
                     <div className="flex flex-col items-center justify-center py-24 gap-4">
                         <span className="spinner w-10 h-10" />
                         <p className="text-sm text-slate-500 font-medium">Loading requests…</p>

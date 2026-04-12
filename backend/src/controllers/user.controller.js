@@ -211,7 +211,7 @@ const searchUsers = asyncHandler(async (req, res) => {
         },
         select: { id: true, fullName: true, email: true }
     });
-    return res.status(200).json(new ApiResponse(200, users, "Users found"));
+    return res.status(200).json(new ApiResponse(200, { data: users }, "Users found"));
 });
 
 export { 

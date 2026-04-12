@@ -37,15 +37,7 @@ const createContract = asyncHandler(async (req, res) => {
         }
     });
 
-    console.log(`\n📋 [CONTRACT CREATED] ─────────────────────────────`);
-    console.log(`   ID       : ${contract.id}`);
-    console.log(`   Title    : "${title}"`);
-    console.log(`   Stake    : ₹${stakeAmount}`);
-    console.log(`   Creator  : ${req.user.id}`);
-    console.log(`   Validator: ${validatorId}`);
-    console.log(`   Deadline : ${new Date(deadline).toLocaleString('en-IN')}`);
-    console.log(`   Status   : PENDING_DEPOSIT (awaiting stake)`);
-    console.log(`─────────────────────────────────────────────────────\n`);
+    logger.info("Contract created", { id: contract.id, title, stakeAmount, creator: req.user.id, validator: validatorId, status: "PENDING_DEPOSIT" });
 
     return res.status(201).json(new ApiResponse(201, { contract }, "Task draft created. Activate it from your dashboard when you’re ready (wallet stake)."));
 });
@@ -54,7 +46,7 @@ const createContract = asyncHandler(async (req, res) => {
  * 2. ACTIVATE CONTRACT WITH WALLET STAKE
  * Why: Locks stake in wallet and activates task without Stripe task payment flow.
  */
-const generatePaymentOrder = asyncHandler(async (req, res) => {
+const activateTask = asyncHandler(async (req, res) => {
     const { contractId } = req.params;
 
     const contract = await prisma.contract.findUnique({
@@ -84,20 +76,12 @@ const generatePaymentOrder = asyncHandler(async (req, res) => {
             throw new ApiError(503, "Temporary queue issue. Please retry activation.");
         }
 
-        console.log(`\n🔒 [STAKE LOCKED - TASK ACTIVATED] ──────────────────`);
-        console.log(`   Contract : ${contract.id}`);
-        console.log(`   Title    : "${contract.title}"`);
-        console.log(`   Creator  : ${req.user.id}`);
-        console.log(`   Stake    : ₹${amount}  (from wallet balance)`);
-        console.log(`   Deadline : ${new Date(activatedContract.deadline).toLocaleString('en-IN')}`);
-        console.log(`   Status   : PENDING_DEPOSIT → ACTIVE`);
-        console.log(`   ⏰ Deadline job queued in ${Math.round(delay / 1000)}s`);
-        console.log(`─────────────────────────────────────────────────────\n`);
+        logger.info("Stake locked and task activated", { contractId: contract.id, creator: req.user.id, amount: amount.toString(), newStatus: "ACTIVE" });
 
         return res.status(200).json(new ApiResponse(200, { activated: true, contract: activatedContract }, "Stake locked from wallet balance. Task is now ACTIVE."));
     }
 
-    console.log(`\n⚠️  [STAKE FAILED] Insufficient balance for Contract ${contract.id}. User ${req.user.id} needs top-up.\n`);
+    logger.warn(`Stake failed due to insufficient balance`, { contractId: contract.id, userId: req.user.id });
     return res.status(400).json(new ApiResponse(400, { needsTopUp: true }, "Insufficient wallet balance. Please top up your wallet first."));
 });
 
@@ -128,13 +112,7 @@ const uploadProof = asyncHandler(async (req, res) => {
     const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000; 
     await queueService.scheduleGracePeriod(contractId, GRACE_PERIOD_MS);
 
-    console.log(`\n📤 [PROOF SUBMITTED] ─────────────────────────────────`);
-    console.log(`   Contract : ${contractId}`);
-    console.log(`   Creator  : ${req.user.id}`);
-    console.log(`   Status   : ACTIVE → VALIDATING`);
-    console.log(`   Proof    : text=${!!proofText}, images=${proofImages?.length || 0}, links=${proofLinks?.length || 0}`);
-    console.log(`   ⏳ Grace period job queued (24h — ghosting prevention)`);
-    console.log(`─────────────────────────────────────────────────────\n`);
+    logger.info("Proof submitted", { contractId, creator: req.user.id, newStatus: "VALIDATING" });
 
     return res.status(200).json(new ApiResponse(200, updatedContract, "Proof submitted. Validator has been notified."));
 });
@@ -152,19 +130,12 @@ const verifyProof = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid contract state for verification.");
     }
 
-    console.log(`\n${decision ? '✅' : '❌'} [VALIDATOR DECISION] ────────────────────────────`);
-    console.log(`   Contract : ${contractId}`);
-    console.log(`   Title    : "${contract.title}"`);
-    console.log(`   Validator: ${req.user.id}`);
-    console.log(`   Decision : ${decision ? 'APPROVED → Stake refunded to creator' : 'REJECTED → Stake awarded to validator'}`);
-    console.log(`   Stake    : ₹${contract.stakeAmount}`);
-    console.log(`─────────────────────────────────────────────────────`);
+    logger.info(`Validator ${decision ? 'APPROVED' : 'REJECTED'} proof`, { contractId, validator: req.user.id, stake: contract.stakeAmount });
 
     // Use Wallet Engine to settle
     await walletService.settleContract(contract.id, decision);
 
-    console.log(`   💰 Settlement complete. Status → ${decision ? 'COMPLETED' : 'REJECTED'}`);
-    console.log(`─────────────────────────────────────────────────────\n`);
+    logger.info("Settlement complete", { contractId, finalStatus: decision ? 'COMPLETED' : 'REJECTED' });
 
     return res.status(200).json(new ApiResponse(200, {}, decision ? "Task approved. Stake refunded to creator." : "Task rejected. Stake awarded to you."));
 });
@@ -221,7 +192,7 @@ const deleteContract = asyncHandler(async (req, res) => {
 
 export { 
     createContract, 
-    generatePaymentOrder, 
+    activateTask, 
     uploadProof, 
     verifyProof, 
     getUserContracts, 

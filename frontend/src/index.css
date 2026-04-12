@@ -5,25 +5,18 @@
 
 /* ─── Design Tokens ───────────────────────────────────────── */
 :root {
-  --bg-page:
-    radial-gradient(
-      circle at 20% 20%,
-      rgba(37, 99, 235, 0.08),
-      transparent 26%
-    ),
-    radial-gradient(circle at 80% 0%, rgba(124, 58, 237, 0.1), transparent 22%),
-    linear-gradient(135deg, #f8fafc, #eef2ff);
+  --bg-page: #f5f7f9;
   /* Backgrounds */
   --bg-base: #ffffff;
   --bg-surface: #fbfdff;
   --bg-elevated: #ffffff;
   --bg-overlay: #f1f5f9;
 
-  /* Brand — Blue/Violet */
-  --brand-red: #2563eb; /* primary accent */
-  --brand-orange: #7c3aed; /* secondary accent */
-  --brand-grad: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
-  --brand-grad-r: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+  /* Brand — Paytm Aesthetic */
+  --brand-red: #00b9f1; /* primary accent (light blue) */
+  --brand-orange: #002e6e; /* secondary accent (dark blue) */
+  --brand-grad: linear-gradient(135deg, #00b9f1 0%, #002e6e 100%);
+  --brand-grad-r: linear-gradient(135deg, #002e6e 0%, #00b9f1 100%);
 
   /* Text */
   --text-primary: #0f172a;
@@ -42,10 +35,10 @@
   --info: #0ea5e9;
 
   /* Shadows */
-  --shadow-sm: 0 4px 16px rgba(15, 23, 42, 0.08);
-  --shadow-md: 0 10px 30px rgba(15, 23, 42, 0.1);
-  --shadow-lg: 0 18px 50px rgba(15, 23, 42, 0.14);
-  --shadow-brand: 0 14px 40px rgba(37, 99, 235, 0.25);
+  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 10px 24px rgba(15, 23, 42, 0.08);
+  --shadow-brand: 0 8px 24px rgba(0, 185, 241, 0.25);
 
   /* Paytm Brand Palette */
   --paytm-blue: #00b9f1;
@@ -81,8 +74,8 @@
     0 4px 6px -1px rgba(15, 23, 42, 0.06),
     0 2px 4px -2px rgba(15, 23, 42, 0.04);
   --elev-3:
-    0 12px 24px -8px rgba(15, 23, 42, 0.12),
-    0 4px 8px -4px rgba(15, 23, 42, 0.06);
+    0 12px 32px -8px rgba(15, 23, 42, 0.10),
+    0 4px 12px -4px rgba(15, 23, 42, 0.05);
 }
 
 ::selection {
@@ -899,29 +892,7 @@ p {
   place-items: center;
 }
 
-.pending-stripe {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  background: rgba(37, 99, 235, 0.05);
-  border-radius: 8px;
-  width: fit-content;
-}
 
-.pending-stripe__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #2563eb;
-}
-
-.pending-stripe__text {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #1e40af;
-}
 
 .balance-label {
   font-size: 0.65rem;
@@ -1276,7 +1247,7 @@ p {
   font-weight: 700;
   font-family: "Outfit", sans-serif;
   color: #ffffff;
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  background: var(--brand-grad);
   box-shadow: 0 6px 20px rgba(37,99,235,0.28);
   border: none;
   cursor: pointer;
@@ -1764,7 +1735,7 @@ p {
 }
 
 .wallet-action-btn--primary {
-  background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%);
+  background: var(--brand-grad);
   box-shadow: 0 4px 16px rgba(37, 99, 235, 0.28);
 }
 

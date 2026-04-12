@@ -78,7 +78,7 @@ const TaskCard = ({ task, onRefetch }) => {
   const { id, title, description, stakeAmount, deadline, status } = task;
   
   const [isInitializing, setIsInitializing] = useState(false);
-  const [initError, setInitError] = useState(null);
+  const [error, setError] = useState(null);
 
   const [isProofModalOpen, setIsProofModalOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
@@ -147,27 +147,27 @@ const TaskCard = ({ task, onRefetch }) => {
 
   // Activate task by locking stake from wallet balance.
   const handleStartPayment = async () => {
-    setInitError(null);
+    setError(null);
     setIsInitializing(true);
     try {
-      const res = await contractService.generatePaymentIntent(id);
+      const res = await contractService.activateContract(id);
 
       if (res?.data?.activated) {
         if (onRefetch) onRefetch();
         return;
       }
       if (res?.data?.needsTopUp) {
-        setInitError("Insufficient wallet balance. Please top up your wallet and try again.");
+        setError("Insufficient wallet balance. Please top up your wallet and try again.");
         return;
       }
-      setInitError("Unable to activate task right now. Please try again.");
+      setError("Unable to activate task right now. Please try again.");
     } catch (err) {
       const body = err.response?.data;
       if (body?.data?.needsTopUp) {
-        setInitError("Insufficient wallet balance. Please top up your wallet and try again.");
+        setError("Insufficient wallet balance. Please top up your wallet and try again.");
         return;
       }
-      setInitError(body?.message || err.message || "Failed to activate task");
+      setError(body?.message || err.message || "Failed to activate task");
     } finally {
       setIsInitializing(false);
     }
@@ -175,12 +175,13 @@ const TaskCard = ({ task, onRefetch }) => {
 
   const handleDelete = async () => {
     setIsDeleting(true);
+    setError(null);
     try {
       await contractService.deleteContract(id);
       if (onRefetch) onRefetch();
     } catch (err) {
       console.error("Failed to delete task:", err);
-      alert("Failed to delete task");
+      setError(err.response?.data?.message || err.message || "Failed to delete task");
     } finally {
       setIsDeleting(false);
     }
@@ -220,6 +221,13 @@ const TaskCard = ({ task, onRefetch }) => {
             )}
           </div>
         </div>
+
+        {error && (
+          <div className="alert alert-error text-xs py-2 mb-4" role="alert">
+            <IconAlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
 
         {/* Meta row */}
         <div className="task-card-new__meta">
@@ -287,12 +295,6 @@ const TaskCard = ({ task, onRefetch }) => {
               </div>
             ) : (
               <>
-                {initError && (
-                  <div className="alert alert-error text-xs py-2" role="alert">
-                    <IconAlertCircle className="w-4 h-4 text-red-600" />
-                    <span>{initError}</span>
-                  </div>
-                )}
                 <button
                   type="button"
                   id={`pay-btn-${id}`}

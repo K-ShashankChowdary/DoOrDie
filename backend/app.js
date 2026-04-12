@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { globalErrorHandler } from "./src/middlewares/errorHandler.js";
+import logger from "./src/utils/logger.js";
 
 const app = express();
 
@@ -23,11 +24,14 @@ app.use(cookieParser());
  */
 app.use((req, res, next) => {
     const start = Date.now();
-    console.log(`\x1b[36m[${new Date().toLocaleTimeString()}] -> ${req.method} ${req.originalUrl}\x1b[0m`);
+    logger.info(`[REQ] -> ${req.method} ${req.originalUrl}`);
     res.on("finish", () => {
         const duration = Date.now() - start;
-        const color = res.statusCode >= 400 ? '\x1b[31m' : '\x1b[32m';
-        console.log(`${color}[${new Date().toLocaleTimeString()}] <- ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Duration: ${duration}ms\x1b[0m`);
+        if (res.statusCode >= 400) {
+            logger.warn(`[RES] <- ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Duration: ${duration}ms`);
+        } else {
+            logger.info(`[RES] <- ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Duration: ${duration}ms`);
+        }
     });
     next();
 });
