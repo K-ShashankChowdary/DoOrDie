@@ -126,8 +126,7 @@ const getUserBalance = asyncHandler(async (req, res) => {
         where: { userId: req.user.id }
     });
     return res.status(200).json(new ApiResponse(200, { 
-        available: Number(wallet?.availableBalance || 0),
-        pending: Number(wallet?.lockedBalance || 0)
+        available: Number(wallet?.availableBalance || 0)
     }, "Wallet balance fetched"));
 });
 
@@ -211,7 +210,7 @@ const searchUsers = asyncHandler(async (req, res) => {
         },
         select: { id: true, fullName: true, email: true }
     });
-    return res.status(200).json(new ApiResponse(200, { data: users }, "Users found"));
+    return res.status(200).json(new ApiResponse(200, { users }, "Users found"));
 });
 
 export { 

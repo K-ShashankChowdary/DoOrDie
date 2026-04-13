@@ -36,7 +36,7 @@ const CreateTaskModal = ({ onClose, onTaskCreated }) => {
       setIsSearching(true);
       try {
         const res = await contractService.searchValidators(searchQuery);
-        setSearchResults(res.data);
+        setSearchResults(res.data.users || []);
       } catch (err) {
         console.error("Failed to search validators", err);
       } finally {

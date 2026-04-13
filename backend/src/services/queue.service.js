@@ -10,9 +10,9 @@ export const taskDeadlineQueue = new Queue("task-deadline-queue", {
         removeOnComplete: 500,
         removeOnFail: 1000,
         attempts: 10,
-        backoff: { type: "exponential", delay: 60000 },
-        skipConfigCheck: true
-    }
+        backoff: { type: "exponential", delay: 60000 }
+    },
+    skipConfigCheck: true
 });
 
 export const gracePeriodQueue = new Queue("validator-grace-period", {
@@ -21,9 +21,9 @@ export const gracePeriodQueue = new Queue("validator-grace-period", {
         removeOnComplete: 500,
         removeOnFail: 1000,
         attempts: 10,
-        backoff: { type: "exponential", delay: 60000 },
-        skipConfigCheck: true
-    }
+        backoff: { type: "exponential", delay: 60000 }
+    },
+    skipConfigCheck: true
 });
 
 export const queueService = {

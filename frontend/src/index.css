@@ -1624,23 +1624,6 @@ p {
   background: rgba(0, 185, 241, 0.05);
 }
 
-.dash-wallet-card__pending {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #b45309;
-}
-
-.dash-wallet-card__pending-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #f59e0b;
-  animation: pulse-ring 2s ease-out infinite;
-  flex-shrink: 0;
-}
 
 .dash-wallet-card__refresh {
   display: flex;

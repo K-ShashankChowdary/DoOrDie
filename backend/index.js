@@ -18,36 +18,38 @@ const startServer = async () => {
         const gracefulShutdown = async (signal) => {
             logger.warn(`Received ${signal}. Initiating graceful shutdown...`);
 
-            // Failsafe: Force kill after 10s if hung
+            // Failsafe: Force kill after 5s if hung
             setTimeout(() => {
                 logger.error("[SYSTEM] Shutdown timed out. Forcing exit.");
                 process.exit(1);
-            }, 10000);
+            }, 5000);
 
-            server.close(async (err) => {
-                if (err) {
-                    logger.error("Error closing HTTP server", { error: err });
-                } else {
-                    logger.info("HTTP server stopped.");
-                }
-
-                try {
-                    logger.info("[SYSTEM] Closing workers...");
-                    await Promise.all([
-                        deadlineWorker.close(),
-                        gracePeriodWorker.close()
-                    ]);
-                    logger.info("[SYSTEM] Workers shut down cleanly.");
-
-                    await prisma.$disconnect();
-                    logger.info("[SYSTEM] Prisma disconnected.");
-
-                    process.exit(0);
-                } catch (shutdownError) {
-                    logger.error("[SYSTEM] Error during coordinated shutdown:", { error: shutdownError });
-                    process.exit(1);
-                }
+            // Stop accepting new connections
+            server.close(() => {
+                logger.info("HTTP server stopped accepting new connections.");
             });
+
+            // Force close lingering keep-alive connections so it doesn't hang
+            if (server.closeAllConnections) {
+                server.closeAllConnections();
+            }
+
+            try {
+                logger.info("[SYSTEM] Closing workers...");
+                await Promise.all([
+                    deadlineWorker.close(),
+                    gracePeriodWorker.close()
+                ]);
+                logger.info("[SYSTEM] Workers shut down cleanly.");
+
+                await prisma.$disconnect();
+                logger.info("[SYSTEM] Prisma disconnected.");
+
+                process.exit(0);
+            } catch (shutdownError) {
+                logger.error("[SYSTEM] Error during coordinated shutdown:", { error: shutdownError });
+                process.exit(1);
+            }
         };
 
         process.on("SIGINT", () => gracefulShutdown("SIGINT"));

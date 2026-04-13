@@ -9,6 +9,7 @@ import {
     IconInbox,
     IconPlus,
     IconWallet,
+    IconAlertCircle
 } from '../components/icons';
 
 const DashboardPage = () => {
@@ -17,7 +18,7 @@ const DashboardPage = () => {
     const [taskError, setTaskError] = useState(null);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [balance, setBalance] = useState({ available: 0, pending: 0 });
+    const [balance, setBalance] = useState({ available: 0 });
     const [showBalance, setShowBalance] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [topupAmount, setTopupAmount] = useState('');
@@ -80,8 +81,6 @@ const DashboardPage = () => {
 
         const interval = setInterval(() => {
             fetchTasks();
-            fetchBalance();
-            fetchWithdrawals();
         }, 15000);
 
         return () => {
@@ -109,11 +108,7 @@ const DashboardPage = () => {
         doneCount: displayedTasks.filter(t => t && (t.status === 'COMPLETED' || t.status === 'REJECTED' || t.status === 'FAILED')).length
     }), [displayedTasks]);
 
-    const totalWallet = useMemo(() => {
-        const a = Number(balance?.available) || 0;
-        const p = Number(balance?.pending) || 0;
-        return a + p;
-    }, [balance]);
+
 
     const firstName = user?.fullName?.split(' ')[0] || 'there';
 
@@ -291,10 +286,7 @@ const DashboardPage = () => {
                                     </p>
                                     {showBalance && (
                                         <p className="dash-wallet-card__sub text-xs text-slate-500 mt-1.5 font-medium">
-                                            Total in wallet ₹{totalWallet.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                            {(Number(balance?.pending) || 0) > 0 && (
-                                                <span className="text-slate-400"> (includes locked funds)</span>
-                                            )}
+                                            Available funds
                                         </p>
                                     )}
                                 </div>
@@ -312,12 +304,7 @@ const DashboardPage = () => {
                                 </button>
                             </div>
 
-                            {(Number(balance?.pending) || 0) > 0 && (
-                                <div className="dash-wallet-card__pending">
-                                    <span className="dash-wallet-card__pending-dot" />
-                                    +₹{(Number(balance?.pending) || 0).toFixed(2)} locked (stakes & withdrawals in flight)
-                                </div>
-                            )}
+
 
                             <button
                                 type="button"
@@ -386,7 +373,7 @@ const DashboardPage = () => {
                                 <div className="space-y-1.5 max-h-28 overflow-auto pr-0.5">
                                     {withdrawals.length === 0 ? (
                                         <p className="text-xs text-slate-400">No withdrawals yet.</p>
-                                    ) : withdrawals.slice(0, 6).map((w) => (
+                                    ) : withdrawals.slice(0, 5).map((w) => (
                                         <div key={w.id} className="flex items-center justify-between text-xs gap-2">
                                             <span className="font-semibold text-slate-700">₹{Number(w.amount).toFixed(2)}</span>
                                             <span className="text-[10px] text-slate-400 shrink-0">{new Date(w.createdAt).toLocaleDateString('en-IN')}</span>
